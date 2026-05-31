@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Chrome Manager Agent",
+  "version": "0.1.0",
+  "description": "Manage Chrome tabs with natural language via a local AI backend.",
+  "action": {
+    "default_title": "Chrome Agent",
+    "default_popup": "pop_up.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "tabs",
+    "tabGroups",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://localhost:8000/*"
+  ]
+}
