@@ -12,13 +12,41 @@ function loadLastStatus() {
             statusDiv.textContent = 'Ready';
             return;
         }
-
         const suffix = lastStatus.updatedAt ? ` (${formatTime(lastStatus.updatedAt)})` : '';
         statusDiv.textContent = `${lastStatus.text}${suffix}`;
     });
 }
 
+// Load saved API key into the input field
+chrome.storage.local.get('geminiApiKey', (data) => {
+    if (data.geminiApiKey) {
+        document.getElementById('apiKeyInput').value = data.geminiApiKey;
+    }
+});
+
 loadLastStatus();
+
+function saveKey(key) {
+    // Strip any non-ASCII characters that would break HTTP headers
+    const clean = key.replace(/[^\x20-\x7E]/g, '');
+    if (!clean) return;
+    chrome.runtime.sendMessage({ type: 'saveApiKey', apiKey: clean }, () => {
+        statusDiv.textContent = 'API key saved ✓';
+    });
+}
+
+document.getElementById('saveKeyBtn').onclick = () => {
+    const key = document.getElementById('apiKeyInput').value.trim();
+    if (!key) { statusDiv.textContent = 'Please enter an API key'; return; }
+    saveKey(key);
+};
+
+document.getElementById('apiKeyInput').addEventListener('paste', (e) => {
+    setTimeout(() => {
+        const key = document.getElementById('apiKeyInput').value.trim();
+        saveKey(key);
+    }, 0);
+});
 
 document.getElementById('sendBtn').onclick = async () => {
     const inputField = document.getElementById('userInput');
@@ -30,65 +58,43 @@ document.getElementById('sendBtn').onclick = async () => {
         return;
     }
 
-    statusDiv.textContent = 'Processing in background, you can close this popup...';
+    statusDiv.textContent = 'Processing...';
     sendBtn.disabled = true;
 
-    chrome.runtime.sendMessage(
-        { type: 'runAgent', prompt },
-        (result) => {
-            sendBtn.disabled = false;
+    chrome.runtime.sendMessage({ type: 'runAgent', prompt }, (result) => {
+        sendBtn.disabled = false;
 
-            if (chrome.runtime.lastError) {
-                statusDiv.textContent = `Failed: ${chrome.runtime.lastError.message}`;
-                return;
-            }
-
-            if (!result?.ok) {
-                statusDiv.textContent = `Failed: ${result?.error || 'Unknown error'}`;
-                return;
-            }
-
-            if (result.commandCount > 0) {
-                statusDiv.textContent = `Done: executed ${result.commandCount} command(s)`;
-            } else {
-                statusDiv.textContent = 'Done: no actions to execute';
-            }
+        if (chrome.runtime.lastError) {
+            statusDiv.textContent = `Failed: ${chrome.runtime.lastError.message}`;
+            return;
         }
-    );
+
+        if (!result?.ok) {
+            statusDiv.textContent = `Failed: ${result?.error || 'Unknown error'}`;
+            return;
+        }
+
+        statusDiv.textContent = result.commandCount > 0
+            ? `Done: executed ${result.commandCount} command(s)`
+            : 'Done: no actions to execute';
+    });
 };
 
 document.getElementById('checkBtn').onclick = () => {
     const checkBtn = document.getElementById('checkBtn');
-
     statusDiv.textContent = 'Checking connection...';
     checkBtn.disabled = true;
 
-    chrome.runtime.sendMessage(
-        { type: 'checkHealth' },
-        (result) => {
-            checkBtn.disabled = false;
+    chrome.runtime.sendMessage({ type: 'checkHealth' }, (result) => {
+        checkBtn.disabled = false;
 
-            if (chrome.runtime.lastError) {
-                statusDiv.textContent = `Connection failed: ${chrome.runtime.lastError.message}`;
-                return;
-            }
-
-            if (!result?.ok) {
-                statusDiv.textContent = `Connection failed: ${result?.error || 'Unknown error'}`;
-                return;
-            }
-
-            const health = result.health || {};
-            const backendOk = health.backend === 'ok';
-            const ollamaOk = Boolean(health.ollamaReachable);
-            const modelOk = Boolean(health.modelAvailable);
-
-            if (backendOk && ollamaOk && modelOk) {
-                statusDiv.textContent = 'Connection OK: Backend + Ollama + model are available';
-                return;
-            }
-
-            statusDiv.textContent = `Status: backend=${backendOk ? 'ok' : 'down'}, ollama=${ollamaOk ? 'ok' : 'down'}, model=${modelOk ? 'ok' : 'missing'}`;
+        if (chrome.runtime.lastError) {
+            statusDiv.textContent = `Connection failed: ${chrome.runtime.lastError.message}`;
+            return;
         }
-    );
+
+        statusDiv.textContent = result?.ok
+            ? 'Connection OK: Gemini API key is valid'
+            : `Connection failed: ${result?.error || 'Unknown error'}`;
+    });
 };

@@ -1,59 +1,103 @@
-const BACKEND_URL = 'http://localhost:8000/process_intent';
-const BACKEND_HEALTH_URL = 'http://localhost:8000/health';
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODEL = 'llama-3.1-8b-instant';
 const REQUEST_TIMEOUT_MS = 30000;
-const HEALTH_TIMEOUT_MS = 8000;
+
+const SYSTEM_PROMPT =
+  'You are a Chrome Tab Manager. ' +
+  'Analyze the tabs and output a JSON object with a "commands" list. ' +
+  'Available actions: ' +
+  '{"action": "group", "tabIds": [number], "title": "Group Name"}, ' +
+  '{"action": "ungroup", "tabIds": [number]}, ' +
+  '{"action": "duplicate", "tabId": number}, ' +
+  '{"action": "remove", "tabId": number}. ' +
+  '"ungroup" moves tabs out of their group without closing them. ' +
+  'Output ONLY valid JSON. No explanation, no markdown.';
 
 function saveLastStatus(text) {
-  chrome.storage.local.set({
-    lastStatus: {
-      text,
-      updatedAt: Date.now(),
-    },
+  chrome.storage.local.set({ lastStatus: { text, updatedAt: Date.now() } });
+}
+
+async function getApiKey() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get('geminiApiKey', (data) => resolve(data.geminiApiKey || ''));
   });
+}
+
+async function callGroq(apiKey, tabs, userPrompt) {
+  const tabInfo = tabs.map((t) => `ID:${t.id} | Title:${t.title} | URL:${t.url}`).join('\n');
+  const userMessage = `Tabs:\n${tabInfo}\n\nUser Request: ${userPrompt}`;
+
+  const body = {
+    model: GROQ_MODEL,
+    temperature: 0.1,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: userMessage },
+    ],
+  };
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  let response;
+  try {
+    response = await fetch(GROQ_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `Groq error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const text = data.choices?.[0]?.message?.content || '{}';
+  return JSON.parse(text);
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'checkHealth') {
     (async () => {
+      const apiKey = await getApiKey();
+      if (!apiKey) {
+        saveLastStatus('No API key set');
+        sendResponse({ ok: false, error: 'No API key set' });
+        return;
+      }
+      // Minimal probe: list models to verify the key works
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
-
-        let response;
-        try {
-          response = await fetch(BACKEND_HEALTH_URL, {
-            method: 'GET',
-            signal: controller.signal,
-          });
-        } finally {
-          clearTimeout(timeoutId);
+        const resp = await fetch('https://api.groq.com/openai/v1/models', {
+          headers: { 'Authorization': `Bearer ${apiKey}` },
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err?.error?.message || `Status ${resp.status}`);
         }
-
-        if (!response.ok) {
-          throw new Error(`Backend health error: ${response.status}`);
-        }
-
-        const health = await response.json();
-        const backendOk = health?.backend === 'ok';
-        const ollamaOk = Boolean(health?.ollamaReachable);
-        const modelOk = Boolean(health?.modelAvailable);
-
-        if (backendOk && ollamaOk && modelOk) {
-          saveLastStatus('Connection OK: Backend + Ollama + model are available');
-        } else {
-          saveLastStatus(`Status: backend=${backendOk ? 'ok' : 'down'}, ollama=${ollamaOk ? 'ok' : 'down'}, model=${modelOk ? 'ok' : 'missing'}`);
-        }
-
-        sendResponse({ ok: true, health });
+        saveLastStatus('Connection OK: Groq API key is valid');
+        sendResponse({ ok: true });
       } catch (error) {
-        const messageText = error?.name === 'AbortError'
-          ? 'Health check timeout after 8s'
-          : (error?.message || 'Unknown error');
-        saveLastStatus(`Connection failed: ${messageText}`);
-        sendResponse({ ok: false, error: messageText });
+        const msg = error?.message || 'Unknown error';
+        saveLastStatus(`Connection failed: ${msg}`);
+        sendResponse({ ok: false, error: msg });
       }
     })();
+    return true;
+  }
 
+  if (message?.type === 'saveApiKey') {
+    chrome.storage.local.set({ geminiApiKey: message.apiKey }, () => {
+      sendResponse({ ok: true });
+    });
     return true;
   }
 
@@ -63,30 +107,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   (async () => {
     try {
+      const apiKey = await getApiKey();
+      if (!apiKey) {
+        saveLastStatus('No API key — please set your Gemini API key first');
+        sendResponse({ ok: false, error: 'No API key set' });
+        return;
+      }
+
       const { prompt } = message;
       const tabs = await chrome.tabs.query({ currentWindow: true });
       const tabData = tabs.map((tab) => ({ id: tab.id, title: tab.title, url: tab.url }));
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-      let response;
-      try {
-        response = await fetch(BACKEND_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_prompt: prompt, tabs: tabData }),
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(timeoutId);
-      }
-
-      if (!response.ok) {
-        throw new Error(`Backend error: ${response.status}`);
-      }
-
-      const result = await response.json();
+      const result = await callGroq(apiKey, tabData, prompt);
       const commands = Array.isArray(result.commands) ? result.commands : [];
 
       let failed = 0;
@@ -111,12 +143,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       sendResponse({ ok: true, commandCount: succeeded });
     } catch (error) {
-      const messageText = error?.name === 'AbortError'
-        ? 'Backend timeout after 30s'
-        : (error?.message || error?.name || String(error) || 'Unknown error');
-      console.error('Agent task failed:', error?.name, error?.message, error);
-      saveLastStatus(`Failed: ${messageText}`);
-      sendResponse({ ok: false, error: messageText });
+      const msg = error?.name === 'AbortError'
+        ? 'Gemini timeout after 30s'
+        : (error?.message || String(error) || 'Unknown error');
+      console.error('Agent task failed:', error);
+      saveLastStatus(`Failed: ${msg}`);
+      sendResponse({ ok: false, error: msg });
     }
   })();
 
@@ -124,7 +156,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function executeChromeCommand(command) {
-  // model sometimes returns "command" instead of "action"
   const action = command.action ?? command.command;
   switch (action) {
     case 'group': {
@@ -132,6 +163,9 @@ async function executeChromeCommand(command) {
       await chrome.tabGroups.update(groupId, { title: command.title || 'AI Group' });
       break;
     }
+    case 'ungroup':
+      await chrome.tabs.ungroup(command.tabIds);
+      break;
     case 'duplicate':
       await chrome.tabs.duplicate(command.tabId);
       break;
