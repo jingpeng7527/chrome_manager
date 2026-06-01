@@ -1,5 +1,5 @@
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_MODEL = 'llama-3.1-8b-instant';
+const GROQ_MODEL = 'llama-3.3-70b-versatile';
 const REQUEST_TIMEOUT_MS = 30000;
 
 const SYSTEM_PROMPT =
@@ -11,6 +11,11 @@ const SYSTEM_PROMPT =
   '{"action": "duplicate", "tabId": number}, ' +
   '{"action": "remove", "tabId": number}. ' +
   '"ungroup" moves tabs out of their group without closing them. ' +
+  'IMPORTANT: Match tabs by URL domain only, never by page title or search query keywords. ' +
+  '"GitHub tabs" means tabs whose URL hostname contains github.com — not search results about GitHub. ' +
+  'If the user wants to add tabs to an existing group, use the existing groupId instead of creating a new one. ' +
+  'For the "group" action, include "groupId" (number) to add to an existing group, or omit it to create a new group. ' +
+  'Never group unrelated tabs. If no tabs match, return {"commands": []}. ' +
   'Output ONLY valid JSON. No explanation, no markdown.';
 
 function saveLastStatus(text) {
@@ -23,9 +28,14 @@ async function getApiKey() {
   });
 }
 
-async function callGroq(apiKey, tabs, userPrompt) {
-  const tabInfo = tabs.map((t) => `ID:${t.id} | Title:${t.title} | URL:${t.url}`).join('\n');
-  const userMessage = `Tabs:\n${tabInfo}\n\nUser Request: ${userPrompt}`;
+async function callGroq(apiKey, tabs, groups, userPrompt) {
+  const tabInfo = tabs
+    .map((t) => `ID:${t.id} | GroupID:${t.groupId ?? 'none'} | Title:${t.title} | URL:${t.url}`)
+    .join('\n');
+  const groupInfo = groups.length
+    ? groups.map((g) => `GroupID:${g.id} | Title:${g.title}`).join('\n')
+    : 'none';
+  const userMessage = `Existing groups:\n${groupInfo}\n\nTabs:\n${tabInfo}\n\nUser Request: ${userPrompt}`;
 
   const body = {
     model: GROQ_MODEL,
@@ -116,9 +126,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       const { prompt } = message;
       const tabs = await chrome.tabs.query({ currentWindow: true });
-      const tabData = tabs.map((tab) => ({ id: tab.id, title: tab.title, url: tab.url }));
+      const tabData = tabs.map((tab) => ({
+        id: tab.id,
+        title: tab.title,
+        url: tab.url,
+        groupId: tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE ? tab.groupId : null,
+      }));
 
-      const result = await callGroq(apiKey, tabData, prompt);
+      const groups = await chrome.tabGroups.query({ windowId: chrome.windows.WINDOW_ID_CURRENT });
+      const groupData = groups.map((g) => ({ id: g.id, title: g.title }));
+
+      const result = await callGroq(apiKey, tabData, groupData, prompt);
       const commands = Array.isArray(result.commands) ? result.commands : [];
 
       let failed = 0;
@@ -159,8 +177,12 @@ async function executeChromeCommand(command) {
   const action = command.action ?? command.command;
   switch (action) {
     case 'group': {
-      const groupId = await chrome.tabs.group({ tabIds: command.tabIds });
-      await chrome.tabGroups.update(groupId, { title: command.title || 'AI Group' });
+      const options = { tabIds: command.tabIds };
+      if (command.groupId) options.groupId = command.groupId;
+      const groupId = await chrome.tabs.group(options);
+      if (!command.groupId) {
+        await chrome.tabGroups.update(groupId, { title: command.title || 'AI Group' });
+      }
       break;
     }
     case 'ungroup':
