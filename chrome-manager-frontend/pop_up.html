@@ -4,29 +4,283 @@
     <meta charset="UTF-8">
     <title>Chrome Agent</title>
     <style>
-        body { width: 300px; padding: 15px; font-family: sans-serif; }
-        textarea { width: 100%; height: 80px; margin-bottom: 10px; box-sizing: border-box; }
-        input[type="password"] { width: 100%; padding: 6px; margin-bottom: 6px; box-sizing: border-box; }
-        button { width: 100%; padding: 10px; margin-bottom: 8px; background: #4285f4; color: #fff; border: none; cursor: pointer; border-radius: 4px; }
-        button:disabled { opacity: 0.5; cursor: default; }
-        #status { margin-top: 10px; font-size: 12px; color: #666; }
-        details { margin-bottom: 10px; font-size: 12px; }
-        summary { cursor: pointer; color: #4285f4; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            width: 340px;
+            background: #1a1a1a;
+            color: #e8e8e8;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            font-size: 13px;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px 12px;
+            border-bottom: 1px solid #2a2a2a;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .logo {
+            width: 20px;
+            height: 20px;
+            background: #4f8ef7;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+        }
+
+        .title {
+            font-weight: 600;
+            font-size: 14px;
+            color: #fff;
+        }
+
+        .tab-count {
+            font-size: 11px;
+            color: #666;
+            background: #2a2a2a;
+            padding: 2px 7px;
+            border-radius: 10px;
+        }
+
+        .key-btn {
+            background: none;
+            border: 1px solid #333;
+            color: #888;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: border-color 0.15s, color 0.15s;
+        }
+        .key-btn:hover { border-color: #555; color: #ccc; }
+
+        .main { padding: 14px 16px; }
+
+        .examples {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        .example-chip {
+            background: #252525;
+            border: 1px solid #333;
+            color: #aaa;
+            font-size: 11px;
+            padding: 4px 9px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+            white-space: nowrap;
+        }
+        .example-chip:hover { background: #2e2e2e; border-color: #4f8ef7; color: #e8e8e8; }
+
+        .input-row {
+            display: flex;
+            gap: 8px;
+            align-items: flex-end;
+        }
+
+        textarea {
+            flex: 1;
+            background: #252525;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #e8e8e8;
+            font-family: inherit;
+            font-size: 13px;
+            padding: 9px 11px;
+            resize: none;
+            height: 68px;
+            outline: none;
+            transition: border-color 0.15s;
+            line-height: 1.4;
+        }
+        textarea::placeholder { color: #555; }
+        textarea:focus { border-color: #4f8ef7; }
+
+        .send-btn {
+            background: #4f8ef7;
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            cursor: pointer;
+            font-size: 18px;
+            width: 38px;
+            height: 68px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s, opacity 0.15s;
+            flex-shrink: 0;
+        }
+        .send-btn:hover { background: #3a7de8; }
+        .send-btn:disabled { opacity: 0.4; cursor: default; }
+
+        .status-bar {
+            margin-top: 11px;
+            padding: 8px 11px;
+            border-radius: 7px;
+            font-size: 12px;
+            min-height: 34px;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            background: #252525;
+            color: #888;
+            transition: background 0.2s, color 0.2s;
+        }
+        .status-bar.ok { background: #1a2e1a; color: #5cb85c; }
+        .status-bar.error { background: #2e1a1a; color: #e06060; }
+        .status-bar.loading { color: #aaa; }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+            flex-shrink: 0;
+        }
+
+        .footer {
+            padding: 10px 16px;
+            border-top: 1px solid #222;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .check-btn {
+            background: none;
+            border: none;
+            color: #555;
+            font-size: 11px;
+            cursor: pointer;
+            padding: 2px 0;
+            transition: color 0.15s;
+        }
+        .check-btn:hover { color: #999; }
+
+        /* API key modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 10;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.open { display: flex; }
+
+        .modal {
+            background: #222;
+            border: 1px solid #333;
+            border-radius: 10px;
+            padding: 18px;
+            width: 290px;
+        }
+
+        .modal h4 { font-size: 13px; color: #fff; margin-bottom: 10px; }
+
+        .modal input {
+            width: 100%;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #e8e8e8;
+            font-family: monospace;
+            font-size: 12px;
+            padding: 8px 10px;
+            outline: none;
+            margin-bottom: 10px;
+        }
+        .modal input:focus { border-color: #4f8ef7; }
+
+        .modal-btns { display: flex; gap: 8px; }
+
+        .modal-save {
+            flex: 1;
+            background: #4f8ef7;
+            border: none;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 12px;
+            padding: 7px;
+            cursor: pointer;
+        }
+        .modal-save:hover { background: #3a7de8; }
+
+        .modal-cancel {
+            flex: 1;
+            background: #2a2a2a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #aaa;
+            font-size: 12px;
+            padding: 7px;
+            cursor: pointer;
+        }
+        .modal-cancel:hover { background: #333; }
     </style>
 </head>
 <body>
-    <h3>Chrome Agent</h3>
 
-    <details id="apiKeySection">
-        <summary>Groq API Key</summary>
-        <input type="password" id="apiKeyInput" placeholder="Paste your Groq API key here" />
-        <button id="saveKeyBtn">Save Key</button>
-    </details>
+    <div class="header">
+        <div class="header-left">
+            <div class="logo">⬡</div>
+            <span class="title">Tab Agent</span>
+            <span class="tab-count" id="tabCount">— tabs</span>
+        </div>
+        <button class="key-btn" id="openKeyModal">API Key</button>
+    </div>
 
-    <textarea id="userInput" placeholder="e.g., Group all GitHub tabs..."></textarea>
-    <button id="sendBtn">Run Command</button>
-    <button id="checkBtn">Check Connection</button>
-    <div id="status"></div>
+    <div class="main">
+        <div class="examples">
+            <span class="example-chip">Group by topic</span>
+            <span class="example-chip">Close duplicates</span>
+            <span class="example-chip">Group GitHub tabs</span>
+            <span class="example-chip">Ungroup all</span>
+        </div>
+
+        <div class="input-row">
+            <textarea id="userInput" placeholder="Tell me what to do with your tabs…"></textarea>
+            <button class="send-btn" id="sendBtn" title="Send (Enter)">↑</button>
+        </div>
+
+        <div class="status-bar" id="statusBar">
+            <div class="status-dot"></div>
+            <span id="statusText">Ready</span>
+        </div>
+    </div>
+
+    <div class="footer">
+        <button class="check-btn" id="checkBtn">Check connection</button>
+    </div>
+
+    <!-- API Key modal -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal">
+            <h4>Groq API Key</h4>
+            <input type="password" id="apiKeyInput" placeholder="gsk_…" />
+            <div class="modal-btns">
+                <button class="modal-cancel" id="modalCancel">Cancel</button>
+                <button class="modal-save" id="saveKeyBtn">Save</button>
+            </div>
+        </div>
+    </div>
+
     <script src="pop_up.js"></script>
 </body>
 </html>

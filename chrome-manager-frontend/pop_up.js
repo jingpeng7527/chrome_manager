@@ -1,100 +1,136 @@
-const statusDiv = document.getElementById('status');
+const statusBar = document.getElementById('statusBar');
+const statusText = document.getElementById('statusText');
+
+function setStatus(text, state = '') {
+    statusBar.className = 'status-bar' + (state ? ' ' + state : '');
+    statusText.textContent = text;
+}
 
 function formatTime(timestamp) {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString();
+    return new Date(timestamp).toLocaleTimeString();
 }
 
 function loadLastStatus() {
     chrome.storage.local.get('lastStatus', (data) => {
-        const lastStatus = data?.lastStatus;
-        if (!lastStatus?.text) {
-            statusDiv.textContent = 'Ready';
-            return;
-        }
-        const suffix = lastStatus.updatedAt ? ` (${formatTime(lastStatus.updatedAt)})` : '';
-        statusDiv.textContent = `${lastStatus.text}${suffix}`;
+        const s = data?.lastStatus;
+        if (!s?.text) { setStatus('Ready'); return; }
+        const suffix = s.updatedAt ? ` (${formatTime(s.updatedAt)})` : '';
+        const state = s.text.startsWith('Done') ? 'ok' : s.text.startsWith('Failed') ? 'error' : '';
+        setStatus(s.text + suffix, state);
     });
 }
 
-// Load saved API key into the input field
+// Tab count
+chrome.tabs?.query({ currentWindow: true }, (tabs) => {
+    document.getElementById('tabCount').textContent = `${tabs?.length ?? 0} tabs`;
+});
+
+// Load saved key
 chrome.storage.local.get('groqApiKey', (data) => {
-    if (data.groqApiKey) {
-        document.getElementById('apiKeyInput').value = data.groqApiKey;
-    }
+    if (data.groqApiKey) document.getElementById('apiKeyInput').value = data.groqApiKey;
 });
 
 loadLastStatus();
 
+// Example chips
+document.querySelectorAll('.example-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+        document.getElementById('userInput').value = chip.textContent;
+        document.getElementById('userInput').focus();
+    });
+});
+
+// API key modal
+document.getElementById('openKeyModal').onclick = () => {
+    document.getElementById('modalOverlay').classList.add('open');
+    document.getElementById('apiKeyInput').focus();
+};
+document.getElementById('modalCancel').onclick = () => {
+    document.getElementById('modalOverlay').classList.remove('open');
+};
+document.getElementById('modalOverlay').onclick = (e) => {
+    if (e.target === document.getElementById('modalOverlay')) {
+        document.getElementById('modalOverlay').classList.remove('open');
+    }
+};
+
 function saveKey(key) {
-    // Strip any non-ASCII characters that would break HTTP headers
     const clean = key.replace(/[^\x20-\x7E]/g, '');
     if (!clean) return;
     chrome.runtime.sendMessage({ type: 'saveApiKey', apiKey: clean }, () => {
-        statusDiv.textContent = 'API key saved ✓';
+        setStatus('API key saved', 'ok');
+        document.getElementById('modalOverlay').classList.remove('open');
     });
 }
 
 document.getElementById('saveKeyBtn').onclick = () => {
     const key = document.getElementById('apiKeyInput').value.trim();
-    if (!key) { statusDiv.textContent = 'Please enter an API key'; return; }
+    if (!key) { setStatus('Please enter an API key', 'error'); return; }
     saveKey(key);
 };
 
 document.getElementById('apiKeyInput').addEventListener('paste', (e) => {
-    setTimeout(() => {
-        const key = document.getElementById('apiKeyInput').value.trim();
-        saveKey(key);
-    }, 0);
+    setTimeout(() => saveKey(document.getElementById('apiKeyInput').value.trim()), 0);
 });
 
-document.getElementById('sendBtn').onclick = async () => {
-    const inputField = document.getElementById('userInput');
+document.getElementById('apiKeyInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('saveKeyBtn').click();
+});
+
+// Send command
+function runAgent() {
+    const prompt = document.getElementById('userInput').value.trim();
+    if (!prompt) { setStatus('Please enter a command', 'error'); return; }
+
     const sendBtn = document.getElementById('sendBtn');
-    const prompt = inputField.value.trim();
-
-    if (!prompt) {
-        statusDiv.textContent = 'Please enter a command';
-        return;
-    }
-
-    statusDiv.textContent = 'Processing...';
+    setStatus('Thinking…', 'loading');
     sendBtn.disabled = true;
 
     chrome.runtime.sendMessage({ type: 'runAgent', prompt }, (result) => {
         sendBtn.disabled = false;
 
         if (chrome.runtime.lastError) {
-            statusDiv.textContent = `Failed: ${chrome.runtime.lastError.message}`;
+            setStatus(`Failed: ${chrome.runtime.lastError.message}`, 'error');
             return;
         }
 
         if (!result?.ok) {
-            statusDiv.textContent = `Failed: ${result?.error || 'Unknown error'}`;
+            setStatus(`Failed: ${result?.error || 'Unknown error'}`, 'error');
             return;
         }
 
-        statusDiv.textContent = result.commandCount > 0
-            ? `Done: executed ${result.commandCount} command(s)`
-            : 'Done: no actions to execute';
+        setStatus(
+            result.commandCount > 0 ? `Done — ${result.commandCount} action(s) executed` : 'Done — no actions taken',
+            'ok'
+        );
     });
-};
+}
 
+document.getElementById('sendBtn').onclick = runAgent;
+
+document.getElementById('userInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        runAgent();
+    }
+});
+
+// Check connection
 document.getElementById('checkBtn').onclick = () => {
-    const checkBtn = document.getElementById('checkBtn');
-    statusDiv.textContent = 'Checking connection...';
-    checkBtn.disabled = true;
+    setStatus('Checking…', 'loading');
+    document.getElementById('checkBtn').disabled = true;
 
     chrome.runtime.sendMessage({ type: 'checkHealth' }, (result) => {
-        checkBtn.disabled = false;
+        document.getElementById('checkBtn').disabled = false;
 
         if (chrome.runtime.lastError) {
-            statusDiv.textContent = `Connection failed: ${chrome.runtime.lastError.message}`;
+            setStatus(`Failed: ${chrome.runtime.lastError.message}`, 'error');
             return;
         }
 
-        statusDiv.textContent = result?.ok
-            ? 'Connection OK: Groq API key is valid'
-            : `Connection failed: ${result?.error || 'Unknown error'}`;
+        setStatus(
+            result?.ok ? 'Connection OK — Groq API key is valid' : `Failed: ${result?.error || 'Unknown error'}`,
+            result?.ok ? 'ok' : 'error'
+        );
     });
 };
