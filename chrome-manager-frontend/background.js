@@ -19,7 +19,7 @@ function saveLastStatus(text) {
 
 async function getApiKey() {
   return new Promise((resolve) => {
-    chrome.storage.local.get('geminiApiKey', (data) => resolve(data.geminiApiKey || ''));
+    chrome.storage.local.get('groqApiKey', (data) => resolve(data.groqApiKey || ''));
   });
 }
 
@@ -95,7 +95,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === 'saveApiKey') {
-    chrome.storage.local.set({ geminiApiKey: message.apiKey }, () => {
+    chrome.storage.local.set({ groqApiKey: message.apiKey }, () => {
       sendResponse({ ok: true });
     });
     return true;
@@ -109,7 +109,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       const apiKey = await getApiKey();
       if (!apiKey) {
-        saveLastStatus('No API key — please set your Gemini API key first');
+        saveLastStatus('No API key — please set your Groq API key first');
         sendResponse({ ok: false, error: 'No API key set' });
         return;
       }
@@ -144,7 +144,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: true, commandCount: succeeded });
     } catch (error) {
       const msg = error?.name === 'AbortError'
-        ? 'Gemini timeout after 30s'
+        ? 'Groq timeout after 30s'
         : (error?.message || String(error) || 'Unknown error');
       console.error('Agent task failed:', error);
       saveLastStatus(`Failed: ${msg}`);

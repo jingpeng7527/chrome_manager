@@ -18,9 +18,9 @@ function loadLastStatus() {
 }
 
 // Load saved API key into the input field
-chrome.storage.local.get('geminiApiKey', (data) => {
-    if (data.geminiApiKey) {
-        document.getElementById('apiKeyInput').value = data.geminiApiKey;
+chrome.storage.local.get('groqApiKey', (data) => {
+    if (data.groqApiKey) {
+        document.getElementById('apiKeyInput').value = data.groqApiKey;
     }
 });
 
@@ -94,7 +94,7 @@ document.getElementById('checkBtn').onclick = () => {
         }
 
         statusDiv.textContent = result?.ok
-            ? 'Connection OK: Gemini API key is valid'
+            ? 'Connection OK: Groq API key is valid'
             : `Connection failed: ${result?.error || 'Unknown error'}`;
     });
 };
