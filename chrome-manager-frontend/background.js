@@ -63,6 +63,22 @@ const KNOWN_DOMAINS = {
   figma: 'figma.com',
 };
 
+// A site name on its own, optionally wrapped in filler: the trailing "tabs" is
+// optional so plain "group stripe" works, and multi-word phrases never match.
+const SITE_RE = /^(?:all\s+|the\s+|my\s+)?([a-z0-9.-]+)(?:\s+(?:tabs?|pages?))?$/;
+const NOT_A_SITE = ['all', 'the', 'my', 'these', 'those', 'everything', 'them', 'tab', 'tabs', 'page', 'pages', 'by'];
+
+function siteTerm(rest) {
+  if (rest == null) return null;
+  const m = rest.trim().match(SITE_RE);
+  return m && !NOT_A_SITE.includes(m[1]) ? m[1] : null;
+}
+
+function tabsMatching(tabs, term) {
+  const domain = KNOWN_DOMAINS[term] || term;
+  return tabs.filter((t) => hostMatches(hostnameOf(t.url), domain)).map((t) => t.id);
+}
+
 // Handle unambiguous commands locally — no API call, no rate limit, instant.
 // Returns an array of commands, or null when the request needs the LLM.
 function findLocalCommands(prompt, tabs, groups) {
@@ -88,19 +104,27 @@ function findLocalCommands(prompt, tabs, groups) {
     return dupes.map((id) => ({ action: 'remove', tabId: id }));
   }
 
-  // "group github tabs" — single site name only, so "group by topic" falls through
-  const match = p.match(/^group\s+(?:all\s+)?([a-z0-9.-]+)\s+tabs$/);
-  if (match && !['all', 'my', 'the', 'these', 'those'].includes(match[1])) {
-    const term = match[1];
-    const domain = KNOWN_DOMAINS[term] || term;
-    const ids = tabs.filter((t) => hostMatches(hostnameOf(t.url), domain)).map((t) => t.id);
-    if (!ids.length) return [];
+  // "stripe", "all stripe tabs", "my github pages" -> "stripe" / "github".
+  // Multi-word phrases like "by topic" never match, so they fall through to the LLM.
+  const term = siteTerm(p.startsWith('group ') ? p.slice(6) : null);
+  if (term) {
+    const ids = tabsMatching(tabs, term);
+    if (!ids.length) return null; // probably a topic, not a site — let the LLM try
 
     // Add to an existing group with the same name rather than creating a second one
     const existing = groups.find((g) => (g.title || '').toLowerCase() === term);
     if (existing) return [{ action: 'group', tabIds: ids, groupId: existing.id }];
 
     return [{ action: 'group', tabIds: ids, title: term.charAt(0).toUpperCase() + term.slice(1) }];
+  }
+
+  const ungroupTerm = siteTerm(p.startsWith('ungroup ') ? p.slice(8) : null);
+  if (ungroupTerm) {
+    const ids = tabsMatching(tabs, ungroupTerm).filter(
+      (id) => tabs.find((t) => t.id === id)?.groupId != null
+    );
+    if (!ids.length) return null;
+    return [{ action: 'ungroup', tabIds: ids }];
   }
 
   return null;
