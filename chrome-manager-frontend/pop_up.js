@@ -99,10 +99,11 @@ function runAgent() {
             return;
         }
 
-        setStatus(
-            result.commandCount > 0 ? `Done — ${result.commandCount} action(s) executed` : 'Done — no actions taken',
-            'ok'
-        );
+        if (result.commandCount > 0) {
+            setStatus(`Done — ${result.commandCount} action(s) executed`, 'ok');
+        } else {
+            setStatus(result.usedAI ? 'AI returned no actions — try rewording' : 'Nothing to do', '');
+        }
     });
 }
 

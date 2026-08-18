@@ -2,21 +2,25 @@ const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL = 'openai/gpt-oss-120b';
 const REQUEST_TIMEOUT_MS = 30000;
 
+// Plain domain matching ("group stripe") is handled locally and never reaches
+// the model, so this prompt covers only requests needing judgement — which are
+// exactly the ones that must read page titles, not just URLs.
 const SYSTEM_PROMPT =
-  'You are a Chrome Tab Manager. ' +
-  'Analyze the tabs and output a JSON object with a "commands" list. ' +
-  'Available actions: ' +
-  '{"action": "group", "tabIds": [number], "title": "Group Name"}, ' +
-  '{"action": "ungroup", "tabIds": [number]}, ' +
-  '{"action": "duplicate", "tabId": number}, ' +
-  '{"action": "remove", "tabId": number}. ' +
-  '"ungroup" moves tabs out of their group without closing them. ' +
-  'IMPORTANT: Match tabs by URL domain only, never by page title or search query keywords. ' +
-  '"GitHub tabs" means tabs whose URL hostname contains github.com — not search results about GitHub. ' +
-  'If the user wants to add tabs to an existing group, use the existing groupId instead of creating a new one. ' +
-  'For the "group" action, include "groupId" (number) to add to an existing group, or omit it to create a new group. ' +
-  'Never group unrelated tabs. If no tabs match, return {"commands": []}. ' +
-  'Output ONLY valid JSON. No explanation, no markdown.';
+  'You organize Chrome tabs. Reply with a JSON object: {"commands": [...]}.\n' +
+  'Commands:\n' +
+  '  {"action":"group","tabIds":[1,2],"title":"Short Name"}\n' +
+  '  {"action":"group","tabIds":[1,2],"groupId":7}   // add to an existing group\n' +
+  '  {"action":"ungroup","tabIds":[1,2]}             // leaves the tabs open\n' +
+  '  {"action":"remove","tabId":1}\n' +
+  '  {"action":"duplicate","tabId":1}\n' +
+  'To group by topic or theme, read each tab\'s title AND url to work out what ' +
+  'it is about, then emit one group command per theme. Aim for 2-5 groups, each ' +
+  'holding at least 2 tabs, each titled in 1-2 words. Leave tabs that fit no ' +
+  'theme ungrouped rather than forcing them together.\n' +
+  'Only use tabIds from the list you are given. Prefer adding to an existing ' +
+  'group over creating a second group with the same name. Return ' +
+  '{"commands": []} only when nothing sensible applies.\n' +
+  'Output JSON only — no prose, no markdown fences.';
 
 function saveLastStatus(text) {
   chrome.storage.local.set({ lastStatus: { text, updatedAt: Date.now() } });
@@ -173,8 +177,18 @@ async function callGroq(apiKey, tabs, groups, userPrompt) {
   }
 
   const data = await response.json();
-  const text = data.choices?.[0]?.message?.content || '{}';
-  return JSON.parse(text);
+  const text = data.choices?.[0]?.message?.content || '';
+  return parseCommands(text);
+}
+
+// Reasoning models sometimes fence the JSON or put a sentence in front of it,
+// so pull out the outermost {...} rather than parsing the reply whole.
+function parseCommands(text) {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end <= start) return [];
+  const obj = JSON.parse(text.slice(start, end + 1));
+  return Array.isArray(obj.commands) ? obj.commands : [];
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -241,8 +255,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: false, error: 'No API key set' });
           return;
         }
-        const result = await callGroq(apiKey, tabData, groupData, prompt);
-        commands = Array.isArray(result.commands) ? result.commands : [];
+        commands = await callGroq(apiKey, tabData, groupData, prompt);
       }
 
       let failed = 0;
@@ -262,10 +275,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           : `Done: executed ${commands.length} command(s)`;
         saveLastStatus(summary);
       } else {
-        saveLastStatus('Done: no actions to execute');
+        saveLastStatus(usedAI ? 'AI returned no actions — try rewording' : 'Nothing to do');
       }
 
-      sendResponse({ ok: true, commandCount: succeeded });
+      sendResponse({ ok: true, commandCount: succeeded, usedAI });
     } catch (error) {
       const msg = error?.name === 'AbortError'
         ? 'Groq timeout after 30s'
