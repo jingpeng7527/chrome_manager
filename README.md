@@ -62,11 +62,9 @@ The extension collects your open tabs (ID, title, URL, current group), sends the
 ```
 chrome-manager-frontend/   # The Chrome extension
 ├── manifest.json          # MV3 manifest
-├── background.js          # Service worker — Groq API calls + Chrome command execution
+├── background.js          # Service worker — local fast path, Groq calls, command execution
 ├── pop_up.html            # Popup UI
 └── pop_up.js              # Popup logic
-
-chrome-agent-backend/      # Legacy FastAPI/Ollama backend (unused)
 ```
 
 ## Contributing
