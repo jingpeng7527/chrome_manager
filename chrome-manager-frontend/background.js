@@ -36,8 +36,11 @@ const SYSTEM_PROMPT_LABELS =
   'Rules:\n' +
   '- Give every tab number from the list exactly one label.\n' +
   '- Tabs that belong together must get the identical label string.\n' +
-  '- A label is 1-2 words describing the topic, taken from the tab\'s title ' +
-  'and url. Aim for 2-5 distinct labels overall.\n' +
+  '- A label is 1-3 words, taken from the tab\'s title and url.\n' +
+  '- Prefer specific labels over broad ones, and split rather than merge: when ' +
+  'two sets of tabs serve different purposes, label them separately — for ' +
+  'example "Interview Prep" and "Job Listings" rather than one "Jobs". Aim for ' +
+  '3-8 distinct labels.\n' +
   '- Use "none" for a tab that fits no topic.\n' +
   '- Judge each tab on its own line. Do not reorder or renumber the tabs.\n' +
   'Output JSON only — no prose, no markdown fences.';
@@ -252,7 +255,10 @@ async function callGroq(apiKey, tabs, groups, userPrompt) {
 
   const body = {
     model: GROQ_MODEL,
-    temperature: 0.1,
+    // temperature 0 + a fixed seed so the same tabs keep landing in the same
+    // groups; inference on shared hardware still varies a little.
+    temperature: 0,
+    seed: 7,
     max_completion_tokens: 2048,
     response_format: { type: 'json_object' },
     messages: [
