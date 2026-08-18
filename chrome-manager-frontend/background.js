@@ -7,19 +7,22 @@ const REQUEST_TIMEOUT_MS = 30000;
 // exactly the ones that must read page titles, not just URLs.
 const SYSTEM_PROMPT =
   'You organize Chrome tabs. Reply with a JSON object: {"commands": [...]}.\n' +
+  'Tabs are numbered 1..N in the list below, and existing groups are numbered ' +
+  '1..M. Refer to them ONLY by those small numbers.\n' +
   'Commands:\n' +
   '  {"action":"group","tabIds":[1,2],"title":"Short Name"}\n' +
-  '  {"action":"group","tabIds":[1,2],"groupId":7}   // add to an existing group\n' +
+  '  {"action":"group","tabIds":[1,2],"groupId":3}   // add to existing group 3\n' +
   '  {"action":"ungroup","tabIds":[1,2]}             // leaves the tabs open\n' +
   '  {"action":"remove","tabId":1}\n' +
   '  {"action":"duplicate","tabId":1}\n' +
+  'Write tabIds as separate numbers with commas between them, like [1,2,3]. ' +
+  'Never run numbers together.\n' +
   'To group by topic or theme, read each tab\'s title AND url to work out what ' +
   'it is about, then emit one group command per theme. Aim for 2-5 groups, each ' +
   'holding at least 2 tabs, each titled in 1-2 words. Leave tabs that fit no ' +
   'theme ungrouped rather than forcing them together.\n' +
-  'Only use tabIds from the list you are given. Prefer adding to an existing ' +
-  'group over creating a second group with the same name. Return ' +
-  '{"commands": []} only when nothing sensible applies.\n' +
+  'Prefer adding to an existing group over creating a second group with the ' +
+  'same name. Return {"commands": []} only when nothing sensible applies.\n' +
   'Output JSON only — no prose, no markdown fences.';
 
 function saveLastStatus(text) {
@@ -134,12 +137,50 @@ function findLocalCommands(prompt, tabs, groups) {
   return null;
 }
 
+// Chrome tab ids are 10 digits long, and models emit them unreliably — they
+// run several together into one number with no commas, which then refers to no
+// real tab. So the model only ever sees 1..N, and we map back here.
+function resolveIndexes(commands, tabs, groups) {
+  const tabId = (n) => tabs[Number(n) - 1]?.id;
+  const out = [];
+
+  for (const c of commands) {
+    const action = c?.action ?? c?.command;
+
+    if (action === 'group' || action === 'ungroup') {
+      const ids = (Array.isArray(c.tabIds) ? c.tabIds : [])
+        .map(tabId)
+        .filter((id) => id != null);
+      if (!ids.length) continue;
+
+      if (action === 'ungroup') {
+        out.push({ action, tabIds: ids });
+        continue;
+      }
+
+      const target = groups[Number(c.groupId) - 1];
+      out.push(c.groupId != null && target
+        ? { action, tabIds: ids, groupId: target.id }
+        : { action, tabIds: ids, title: c.title || 'Group' });
+    } else if (action === 'remove' || action === 'duplicate') {
+      const id = tabId(c.tabId);
+      if (id != null) out.push({ action, tabId: id });
+    }
+  }
+
+  return out;
+}
+
 async function callGroq(apiKey, tabs, groups, userPrompt) {
+  const groupIndex = new Map(groups.map((g, i) => [g.id, i + 1]));
   const tabInfo = tabs
-    .map((t) => `ID:${t.id} | GroupID:${t.groupId ?? 'none'} | Title:${t.title.slice(0, 60)} | URL:${trimUrl(t.url)}`)
+    .map((t, i) => {
+      const inGroup = groupIndex.has(t.groupId) ? ` [group ${groupIndex.get(t.groupId)}]` : '';
+      return `${i + 1}. ${(t.title || '').slice(0, 60)} — ${trimUrl(t.url)}${inGroup}`;
+    })
     .join('\n');
   const groupInfo = groups.length
-    ? groups.map((g) => `GroupID:${g.id} | Title:${g.title}`).join('\n')
+    ? groups.map((g, i) => `${i + 1}. ${g.title || '(untitled)'}`).join('\n')
     : 'none';
   const userMessage = `Existing groups:\n${groupInfo}\n\nTabs:\n${tabInfo}\n\nUser Request: ${userPrompt}`;
 
@@ -183,7 +224,7 @@ async function callGroq(apiKey, tabs, groups, userPrompt) {
   // channel, content comes back empty and the JSON is over in `reasoning`.
   const text = msg.content || msg.reasoning || '';
   console.log('Groq reply:', JSON.stringify(data.choices?.[0] ?? data));
-  return { commands: parseCommands(text), raw: text };
+  return { commands: resolveIndexes(parseCommands(text), tabs, groups), raw: text };
 }
 
 // Reasoning models fence their JSON or put a sentence in front of it, and they
