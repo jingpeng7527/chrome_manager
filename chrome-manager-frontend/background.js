@@ -1,5 +1,5 @@
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_MODEL = 'llama-3.1-8b-instant';
+const GROQ_MODEL = 'openai/gpt-oss-20b';
 const REQUEST_TIMEOUT_MS = 30000;
 
 const SYSTEM_PROMPT =
@@ -33,6 +33,66 @@ function trimUrl(url) {
     const u = new URL(url);
     return u.origin + u.pathname.slice(0, 60);
   } catch { return url.slice(0, 80); }
+}
+
+function hostnameOf(url) {
+  try { return new URL(url).hostname.toLowerCase(); } catch { return ''; }
+}
+
+// Common site names the user is likely to type, mapped to their real hostname
+const KNOWN_DOMAINS = {
+  github: 'github.com',
+  youtube: 'youtube.com',
+  twitter: 'twitter.com',
+  x: 'x.com',
+  reddit: 'reddit.com',
+  google: 'google.com',
+  gmail: 'mail.google.com',
+  stackoverflow: 'stackoverflow.com',
+  linkedin: 'linkedin.com',
+  notion: 'notion.so',
+  figma: 'figma.com',
+};
+
+// Handle unambiguous commands locally — no API call, no rate limit, instant.
+// Returns an array of commands, or null when the request needs the LLM.
+function findLocalCommands(prompt, tabs, groups) {
+  const p = prompt.toLowerCase().trim().replace(/[.!]+$/, '');
+
+  // "ungroup all" / "ungroup everything"
+  if (/^ungroup\s+(all|everything)(\s+tabs)?$/.test(p)) {
+    const ids = tabs.filter((t) => t.groupId != null).map((t) => t.id);
+    return ids.length ? [{ action: 'ungroup', tabIds: ids }] : [];
+  }
+
+  // "close duplicates" / "remove duplicate tabs"
+  if (/^(close|remove)\s+duplicated?s?(\s+tabs)?$/.test(p)) {
+    const seen = new Set();
+    const dupes = [];
+    for (const t of tabs) {
+      const key = trimUrl(t.url);
+      if (seen.has(key)) dupes.push(t.id);
+      else seen.add(key);
+    }
+    return dupes.map((id) => ({ action: 'remove', tabId: id }));
+  }
+
+  // "group github tabs" — single site name only, so "group by topic" falls through
+  const match = p.match(/^group\s+(?:all\s+)?([a-z0-9.-]+)\s+tabs$/);
+  if (match && !['all', 'my', 'the', 'these', 'those'].includes(match[1])) {
+    const term = match[1];
+    const domain = KNOWN_DOMAINS[term] || term;
+    const ids = tabs.filter((t) => hostnameOf(t.url).includes(domain)).map((t) => t.id);
+    if (!ids.length) return [];
+
+    // Add to an existing group with the same name rather than creating a second one
+    const existing = groups.find((g) => (g.title || '').toLowerCase() === term);
+    if (existing) return [{ action: 'group', tabIds: ids, groupId: existing.id }];
+
+    return [{ action: 'group', tabIds: ids, title: term.charAt(0).toUpperCase() + term.slice(1) }];
+  }
+
+  return null;
 }
 
 async function callGroq(apiKey, tabs, groups, userPrompt) {
@@ -124,13 +184,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   (async () => {
     try {
-      const apiKey = await getApiKey();
-      if (!apiKey) {
-        saveLastStatus('No API key — please set your Groq API key first');
-        sendResponse({ ok: false, error: 'No API key set' });
-        return;
-      }
-
       const { prompt } = message;
       const tabs = await chrome.tabs.query({ currentWindow: true });
       const tabData = tabs.map((tab) => ({
@@ -143,8 +196,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const groups = await chrome.tabGroups.query({ windowId: chrome.windows.WINDOW_ID_CURRENT });
       const groupData = groups.map((g) => ({ id: g.id, title: g.title }));
 
-      const result = await callGroq(apiKey, tabData, groupData, prompt);
-      const commands = Array.isArray(result.commands) ? result.commands : [];
+      let commands = findLocalCommands(prompt, tabData, groupData);
+      const usedAI = commands === null;
+
+      if (usedAI) {
+        const apiKey = await getApiKey();
+        if (!apiKey) {
+          saveLastStatus('No API key — please set your Groq API key first');
+          sendResponse({ ok: false, error: 'No API key set' });
+          return;
+        }
+        const result = await callGroq(apiKey, tabData, groupData, prompt);
+        commands = Array.isArray(result.commands) ? result.commands : [];
+      }
 
       let failed = 0;
       for (const command of commands) {
