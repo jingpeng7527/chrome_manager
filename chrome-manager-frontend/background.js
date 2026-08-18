@@ -1,5 +1,5 @@
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
+const GROQ_MODEL = 'qwen/qwen3.6-27b';
 const REQUEST_TIMEOUT_MS = 30000;
 
 const SYSTEM_PROMPT =
