@@ -1,5 +1,5 @@
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_MODEL = 'openai/gpt-oss-20b';
+const GROQ_MODEL = 'llama-3.1-8b-instant';
 const REQUEST_TIMEOUT_MS = 30000;
 
 const SYSTEM_PROMPT =
@@ -28,9 +28,16 @@ async function getApiKey() {
   });
 }
 
+function trimUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.origin + u.pathname.slice(0, 60);
+  } catch { return url.slice(0, 80); }
+}
+
 async function callGroq(apiKey, tabs, groups, userPrompt) {
   const tabInfo = tabs
-    .map((t) => `ID:${t.id} | GroupID:${t.groupId ?? 'none'} | Title:${t.title} | URL:${t.url}`)
+    .map((t) => `ID:${t.id} | GroupID:${t.groupId ?? 'none'} | Title:${t.title.slice(0, 60)} | URL:${trimUrl(t.url)}`)
     .join('\n');
   const groupInfo = groups.length
     ? groups.map((g) => `GroupID:${g.id} | Title:${g.title}`).join('\n')
