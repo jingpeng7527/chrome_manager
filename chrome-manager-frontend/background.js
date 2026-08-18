@@ -146,6 +146,7 @@ async function callGroq(apiKey, tabs, groups, userPrompt) {
   const body = {
     model: GROQ_MODEL,
     temperature: 0.1,
+    max_completion_tokens: 2048,
     response_format: { type: 'json_object' },
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
@@ -177,18 +178,34 @@ async function callGroq(apiKey, tabs, groups, userPrompt) {
   }
 
   const data = await response.json();
-  const text = data.choices?.[0]?.message?.content || '';
-  return parseCommands(text);
+  const msg = data.choices?.[0]?.message ?? {};
+  // gpt-oss is a reasoning model: if the whole reply landed in the reasoning
+  // channel, content comes back empty and the JSON is over in `reasoning`.
+  const text = msg.content || msg.reasoning || '';
+  console.log('Groq reply:', JSON.stringify(data.choices?.[0] ?? data));
+  return { commands: parseCommands(text), raw: text };
 }
 
-// Reasoning models sometimes fence the JSON or put a sentence in front of it,
-// so pull out the outermost {...} rather than parsing the reply whole.
+// Reasoning models fence their JSON or put a sentence in front of it, and they
+// don't always use the key we asked for — so extract the outermost JSON value
+// and accept any of the shapes a model plausibly returns.
 function parseCommands(text) {
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
+  const start = text.search(/[{[]/);
+  const end = Math.max(text.lastIndexOf('}'), text.lastIndexOf(']'));
   if (start === -1 || end <= start) return [];
-  const obj = JSON.parse(text.slice(start, end + 1));
-  return Array.isArray(obj.commands) ? obj.commands : [];
+
+  let value;
+  try {
+    value = JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return [];
+  }
+
+  if (Array.isArray(value)) return value;
+  for (const key of ['commands', 'actions', 'result']) {
+    if (Array.isArray(value?.[key])) return value[key];
+  }
+  return [];
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -247,6 +264,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       let commands = findLocalCommands(prompt, tabData, groupData);
       const usedAI = commands === null;
+      let aiRaw = '';
 
       if (usedAI) {
         const apiKey = await getApiKey();
@@ -255,7 +273,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: false, error: 'No API key set' });
           return;
         }
-        commands = await callGroq(apiKey, tabData, groupData, prompt);
+        const res = await callGroq(apiKey, tabData, groupData, prompt);
+        commands = res.commands;
+        aiRaw = res.raw;
       }
 
       let failed = 0;
@@ -275,10 +295,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           : `Done: executed ${commands.length} command(s)`;
         saveLastStatus(summary);
       } else {
-        saveLastStatus(usedAI ? 'AI returned no actions — try rewording' : 'Nothing to do');
+        saveLastStatus(usedAI
+          ? `AI returned no actions. Reply: ${(aiRaw || '(empty)').slice(0, 150)}`
+          : 'Nothing to do');
       }
 
-      sendResponse({ ok: true, commandCount: succeeded, usedAI });
+      sendResponse({ ok: true, commandCount: succeeded, usedAI, aiRaw });
     } catch (error) {
       const msg = error?.name === 'AbortError'
         ? 'Groq timeout after 30s'

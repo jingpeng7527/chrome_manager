@@ -102,7 +102,12 @@ function runAgent() {
         if (result.commandCount > 0) {
             setStatus(`Done — ${result.commandCount} action(s) executed`, 'ok');
         } else {
-            setStatus(result.usedAI ? 'AI returned no actions — try rewording' : 'Nothing to do', '');
+            setStatus(
+                result.usedAI
+                    ? `AI returned no actions. Reply: ${(result.aiRaw || '(empty)').slice(0, 150)}`
+                    : 'Nothing to do',
+                ''
+            );
         }
     });
 }
