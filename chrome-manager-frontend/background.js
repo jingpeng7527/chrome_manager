@@ -1,5 +1,5 @@
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_MODEL = 'openai/gpt-oss-20b';
+const GROQ_MODEL = 'openai/gpt-oss-120b';
 const REQUEST_TIMEOUT_MS = 30000;
 
 const SYSTEM_PROMPT =
@@ -39,6 +39,15 @@ function hostnameOf(url) {
   try { return new URL(url).hostname.toLowerCase(); } catch { return ''; }
 }
 
+// A bare term ("figma") matches any hostname label; a full domain ("x.com")
+// must match the hostname exactly or as a suffix, so netflix.com != x.com.
+function hostMatches(hostname, target) {
+  if (target.includes('.')) {
+    return hostname === target || hostname.endsWith('.' + target);
+  }
+  return hostname.split('.').includes(target);
+}
+
 // Common site names the user is likely to type, mapped to their real hostname
 const KNOWN_DOMAINS = {
   github: 'github.com',
@@ -67,10 +76,12 @@ function findLocalCommands(prompt, tabs, groups) {
 
   // "close duplicates" / "remove duplicate tabs"
   if (/^(close|remove)\s+duplicated?s?(\s+tabs)?$/.test(p)) {
+    // Compare full URLs (minus the #fragment) — trimUrl drops the query string,
+    // which would treat ?v=AAA and ?v=BBB as the same page and close one of them.
     const seen = new Set();
     const dupes = [];
     for (const t of tabs) {
-      const key = trimUrl(t.url);
+      const key = (t.url || '').split('#')[0];
       if (seen.has(key)) dupes.push(t.id);
       else seen.add(key);
     }
@@ -82,7 +93,7 @@ function findLocalCommands(prompt, tabs, groups) {
   if (match && !['all', 'my', 'the', 'these', 'those'].includes(match[1])) {
     const term = match[1];
     const domain = KNOWN_DOMAINS[term] || term;
-    const ids = tabs.filter((t) => hostnameOf(t.url).includes(domain)).map((t) => t.id);
+    const ids = tabs.filter((t) => hostMatches(hostnameOf(t.url), domain)).map((t) => t.id);
     if (!ids.length) return [];
 
     // Add to an existing group with the same name rather than creating a second one
