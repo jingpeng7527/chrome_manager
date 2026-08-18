@@ -25,6 +25,23 @@ const SYSTEM_PROMPT =
   'same name. Return {"commands": []} only when nothing sensible applies.\n' +
   'Output JSON only — no prose, no markdown fences.';
 
+// Grouping is asked for as one label per tab rather than as arrays of indices.
+// Building a correct array of indices is where the model fails: it mixes tabs
+// between arrays. Labelling each tab on its own line is answered positionally,
+// so a mistake costs one tab instead of a whole group, and the code — not the
+// model — decides which tabs end up together.
+const SYSTEM_PROMPT_LABELS =
+  'You sort Chrome tabs into topics. You are given a numbered list of tabs.\n' +
+  'Reply with JSON: {"labels": {"1": "AWS", "2": "AWS", "3": "Stripe"}}\n' +
+  'Rules:\n' +
+  '- Give every tab number from the list exactly one label.\n' +
+  '- Tabs that belong together must get the identical label string.\n' +
+  '- A label is 1-2 words describing the topic, taken from the tab\'s title ' +
+  'and url. Aim for 2-5 distinct labels overall.\n' +
+  '- Use "none" for a tab that fits no topic.\n' +
+  '- Judge each tab on its own line. Do not reorder or renumber the tabs.\n' +
+  'Output JSON only — no prose, no markdown fences.';
+
 function saveLastStatus(text) {
   chrome.storage.local.set({ lastStatus: { text, updatedAt: Date.now() } });
 }
@@ -171,6 +188,53 @@ function resolveIndexes(commands, tabs, groups) {
   return out;
 }
 
+function parseLabels(text) {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+
+  let value;
+  try {
+    value = JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+
+  const obj = value && typeof value.labels === 'object' && value.labels ? value.labels : value;
+  return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : null;
+}
+
+// Bucket tabs by the label the model gave them. The code owns which tabs end
+// up together, so a mislabelled tab can only ever move itself.
+function commandsFromLabels(labels, tabs, groups) {
+  const buckets = new Map();
+
+  for (const [key, value] of Object.entries(labels ?? {})) {
+    const tab = tabs[Number(key) - 1];
+    const label = String(value ?? '').trim();
+    if (!tab || !label || label.toLowerCase() === 'none') continue;
+
+    const bucket = label.toLowerCase();
+    if (!buckets.has(bucket)) buckets.set(bucket, { title: label, ids: [] });
+    buckets.get(bucket).ids.push(tab.id);
+  }
+
+  const commands = [];
+  for (const { title, ids } of buckets.values()) {
+    if (ids.length < 2) continue; // a lone tab is not a group
+    const existing = groups.find((g) => (g.title || '').toLowerCase() === title.toLowerCase());
+    commands.push(existing
+      ? { action: 'group', tabIds: ids, groupId: existing.id }
+      : { action: 'group', tabIds: ids, title });
+  }
+  return commands;
+}
+
+// Grouping requests go through labelling; anything else still asks for commands.
+function isGroupingRequest(prompt) {
+  return /\b(group|organi[sz]e|sort|categor|tidy|clean\s*up)\b/i.test(prompt);
+}
+
 async function callGroq(apiKey, tabs, groups, userPrompt) {
   const groupIndex = new Map(groups.map((g, i) => [g.id, i + 1]));
   const tabInfo = tabs
@@ -184,13 +248,15 @@ async function callGroq(apiKey, tabs, groups, userPrompt) {
     : 'none';
   const userMessage = `Existing groups:\n${groupInfo}\n\nTabs:\n${tabInfo}\n\nUser Request: ${userPrompt}`;
 
+  const labelling = isGroupingRequest(userPrompt);
+
   const body = {
     model: GROQ_MODEL,
     temperature: 0.1,
     max_completion_tokens: 2048,
     response_format: { type: 'json_object' },
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: labelling ? SYSTEM_PROMPT_LABELS : SYSTEM_PROMPT },
       { role: 'user', content: userMessage },
     ],
   };
@@ -224,7 +290,12 @@ async function callGroq(apiKey, tabs, groups, userPrompt) {
   // channel, content comes back empty and the JSON is over in `reasoning`.
   const text = msg.content || msg.reasoning || '';
   console.log('Groq reply:', JSON.stringify(data.choices?.[0] ?? data));
-  return { commands: resolveIndexes(parseCommands(text), tabs, groups), raw: text };
+
+  const commands = labelling
+    ? commandsFromLabels(parseLabels(text), tabs, groups)
+    : resolveIndexes(parseCommands(text), tabs, groups);
+
+  return { commands, raw: text };
 }
 
 // Reasoning models fence their JSON or put a sentence in front of it, and they
