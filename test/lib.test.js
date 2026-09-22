@@ -11,6 +11,8 @@ import {
   parseLabels,
   resolveIndexes,
   siteTerm,
+  SYSTEM_PROMPT,
+  SYSTEM_PROMPT_LABELS,
   trimUrl,
 } from '../chrome-manager-frontend/lib.js';
 
@@ -338,6 +340,43 @@ describe('buildUserMessage', () => {
 
   it('says "none" when there are no groups', () => {
     assert.match(buildUserMessage([], [], 'hi'), /Existing groups:\nnone/);
+  });
+});
+
+describe('system prompts', () => {
+  const exampleOf = (prompt) => prompt.match(/\{"labels".*?\}\}/)[0];
+
+  it('shows the model an example our own parser accepts', () => {
+    // The example is a contract between the prompt and parseLabels. If one
+    // drifts from the other, the model is being shown a shape we cannot read.
+    const labels = parseLabels(exampleOf(SYSTEM_PROMPT_LABELS));
+    assert.ok(labels, 'the example in the prompt must parse');
+  });
+
+  it('repeats a label, since that is the rule the design depends on', () => {
+    // commandsFromLabels buckets on the exact string: two tabs labelled "AWS"
+    // and "Amazon Web Services" fall into separate buckets, neither reaches the
+    // two-tab minimum, and no group is created. The example teaches this by
+    // using one label twice — a well-meaning tidy-up to three distinct labels
+    // would silently remove the demonstration.
+    const values = Object.values(parseLabels(exampleOf(SYSTEM_PROMPT_LABELS)));
+    assert.ok(values.length > new Set(values).size, 'example must reuse one label');
+    assert.ok(new Set(values).size > 1, 'example must also show a second group');
+  });
+
+  it('produces a real group when run through our own pipeline', () => {
+    const labels = parseLabels(exampleOf(SYSTEM_PROMPT_LABELS));
+    const tabs = Object.keys(labels).map((k) => tab(Number(k) * 10, `Tab ${k}`, `https://x${k}.com`));
+    const commands = commandsFromLabels(labels, tabs, []);
+
+    assert.equal(commands.length, 1, 'the repeated label should form exactly one group');
+    assert.equal(commands[0].action, 'group');
+    assert.equal(commands[0].tabIds.length, 2);
+  });
+
+  it('keeps the command prompt free of raw Chrome ids', () => {
+    assert.match(SYSTEM_PROMPT, /numbered 1\.\.N/);
+    assert.doesNotMatch(SYSTEM_PROMPT, /\d{9,}/, 'no long ids should appear as examples');
   });
 });
 

@@ -213,6 +213,56 @@ export function isGroupingRequest(prompt) {
   return /\b(group|organi[sz]e|sort|categor|tidy|clean\s*up)\b/i.test(prompt);
 }
 
+// Plain domain matching ("group stripe") is handled locally and never reaches
+// the model, so this prompt covers only requests needing judgement — which are
+// exactly the ones that must read page titles, not just URLs.
+export const SYSTEM_PROMPT =
+  'You organize Chrome tabs. Reply with a JSON object: {"commands": [...]}.\n' +
+  'Tabs are numbered 1..N in the list below, and existing groups are numbered ' +
+  '1..M. Refer to them ONLY by those small numbers.\n' +
+  'Commands:\n' +
+  '  {"action":"group","tabIds":[1,2],"title":"Short Name"}\n' +
+  '  {"action":"group","tabIds":[1,2],"groupId":3}   // add to existing group 3\n' +
+  '  {"action":"ungroup","tabIds":[1,2]}             // leaves the tabs open\n' +
+  '  {"action":"remove","tabId":1}\n' +
+  '  {"action":"duplicate","tabId":1}\n' +
+  'Write tabIds as separate numbers with commas between them, like [1,2,3]. ' +
+  'Never run numbers together.\n' +
+  'To group by topic or theme, read each tab\'s title AND url to work out what ' +
+  'it is about, then emit one group command per theme. Aim for 2-5 groups, each ' +
+  'holding at least 2 tabs, each titled in 1-2 words. Leave tabs that fit no ' +
+  'theme ungrouped rather than forcing them together.\n' +
+  'Prefer adding to an existing group over creating a second group with the ' +
+  'same name. Return {"commands": []} only when nothing sensible applies.\n' +
+  'Output JSON only — no prose, no markdown fences.';
+
+// Grouping is asked for as one label per tab rather than as arrays of indices.
+// Building a correct array of indices is where the model fails: it mixes tabs
+// between arrays. Labelling each tab on its own line is answered positionally,
+// so a mistake costs one tab instead of a whole group, and the code — not the
+// model — decides which tabs end up together.
+//
+// The example repeats one label deliberately: commandsFromLabels buckets on the
+// exact string, so two tabs described as "AWS" and "Amazon Web Services" land in
+// separate buckets and neither reaches the two-tab minimum, producing no group
+// at all. Showing the repetition teaches that better than prose can. The labels
+// themselves are generic on purpose, so the example cannot nudge the model
+// toward any particular product.
+export const SYSTEM_PROMPT_LABELS =
+  'You sort Chrome tabs into topics. You are given a numbered list of tabs.\n' +
+  'Reply with JSON: {"labels": {"1": "Cloud Console", "2": "Cloud Console", "3": "Payments"}}\n' +
+  'Rules:\n' +
+  '- Give every tab number from the list exactly one label.\n' +
+  '- Tabs that belong together must get the identical label string.\n' +
+  '- A label is 1-3 words, taken from the tab\'s title and url.\n' +
+  '- Prefer specific labels over broad ones, and split rather than merge: when ' +
+  'two sets of tabs serve different purposes, label them separately — for ' +
+  'example "Interview Prep" and "Job Listings" rather than one "Jobs". Aim for ' +
+  '3-8 distinct labels.\n' +
+  '- Use "none" for a tab that fits no topic.\n' +
+  '- Judge each tab on its own line. Do not reorder or renumber the tabs.\n' +
+  'Output JSON only — no prose, no markdown fences.';
+
 // Tabs and groups are presented to the model as 1..N, never as Chrome ids.
 export function buildUserMessage(tabs, groups, userPrompt) {
   const groupIndex = new Map(groups.map((g, i) => [g.id, i + 1]));

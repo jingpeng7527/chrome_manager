@@ -6,55 +6,14 @@ import {
   parseCommands,
   parseLabels,
   resolveIndexes,
+  SYSTEM_PROMPT,
+  SYSTEM_PROMPT_LABELS,
 } from './lib.js';
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODELS_URL = 'https://api.groq.com/openai/v1/models';
 const GROQ_MODEL = 'openai/gpt-oss-120b';
 const REQUEST_TIMEOUT_MS = 30000;
-
-// Plain domain matching ("group stripe") is handled locally and never reaches
-// the model, so this prompt covers only requests needing judgement — which are
-// exactly the ones that must read page titles, not just URLs.
-const SYSTEM_PROMPT =
-  'You organize Chrome tabs. Reply with a JSON object: {"commands": [...]}.\n' +
-  'Tabs are numbered 1..N in the list below, and existing groups are numbered ' +
-  '1..M. Refer to them ONLY by those small numbers.\n' +
-  'Commands:\n' +
-  '  {"action":"group","tabIds":[1,2],"title":"Short Name"}\n' +
-  '  {"action":"group","tabIds":[1,2],"groupId":3}   // add to existing group 3\n' +
-  '  {"action":"ungroup","tabIds":[1,2]}             // leaves the tabs open\n' +
-  '  {"action":"remove","tabId":1}\n' +
-  '  {"action":"duplicate","tabId":1}\n' +
-  'Write tabIds as separate numbers with commas between them, like [1,2,3]. ' +
-  'Never run numbers together.\n' +
-  'To group by topic or theme, read each tab\'s title AND url to work out what ' +
-  'it is about, then emit one group command per theme. Aim for 2-5 groups, each ' +
-  'holding at least 2 tabs, each titled in 1-2 words. Leave tabs that fit no ' +
-  'theme ungrouped rather than forcing them together.\n' +
-  'Prefer adding to an existing group over creating a second group with the ' +
-  'same name. Return {"commands": []} only when nothing sensible applies.\n' +
-  'Output JSON only — no prose, no markdown fences.';
-
-// Grouping is asked for as one label per tab rather than as arrays of indices.
-// Building a correct array of indices is where the model fails: it mixes tabs
-// between arrays. Labelling each tab on its own line is answered positionally,
-// so a mistake costs one tab instead of a whole group, and the code — not the
-// model — decides which tabs end up together.
-const SYSTEM_PROMPT_LABELS =
-  'You sort Chrome tabs into topics. You are given a numbered list of tabs.\n' +
-  'Reply with JSON: {"labels": {"1": "AWS", "2": "AWS", "3": "Stripe"}}\n' +
-  'Rules:\n' +
-  '- Give every tab number from the list exactly one label.\n' +
-  '- Tabs that belong together must get the identical label string.\n' +
-  '- A label is 1-3 words, taken from the tab\'s title and url.\n' +
-  '- Prefer specific labels over broad ones, and split rather than merge: when ' +
-  'two sets of tabs serve different purposes, label them separately — for ' +
-  'example "Interview Prep" and "Job Listings" rather than one "Jobs". Aim for ' +
-  '3-8 distinct labels.\n' +
-  '- Use "none" for a tab that fits no topic.\n' +
-  '- Judge each tab on its own line. Do not reorder or renumber the tabs.\n' +
-  'Output JSON only — no prose, no markdown fences.';
 
 function saveLastStatus(text) {
   chrome.storage.local.set({ lastStatus: { text, updatedAt: Date.now() } });
