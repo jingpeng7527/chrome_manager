@@ -4,6 +4,7 @@
 
 Too many tabs open? Tab Agent lets you group, close, and organize them using natural language — powered by Groq's free LLM API, running entirely in your browser extension with no local server required.
 
+[![CI](https://github.com/jingpeng7527/chrome_manager/actions/workflows/ci.yml/badge.svg)](https://github.com/jingpeng7527/chrome_manager/actions/workflows/ci.yml)
 ![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-4285F4?logo=googlechrome&logoColor=white)
 ![Manifest V3](https://img.shields.io/badge/Manifest-V3-green)
 ![License](https://img.shields.io/badge/license-MIT-blue)
@@ -62,10 +63,27 @@ The extension collects your open tabs (ID, title, URL, current group), sends the
 ```
 chrome-manager-frontend/   # The Chrome extension
 ├── manifest.json          # MV3 manifest
-├── background.js          # Service worker — local fast path, Groq calls, command execution
+├── lib.js                 # Pure logic — matching, parsing, grouping (unit tested)
+├── background.js          # Service worker — Chrome APIs and Groq calls
 ├── pop_up.html            # Popup UI
 └── pop_up.js              # Popup logic
+
+test/                      # Node test-runner suites, no dependencies
+├── lib.test.js            # Tab matching, model-reply parsing, grouping
+└── manifest.test.js       # Manifest and popup wiring
 ```
+
+## Development
+
+Everything that does not touch `chrome.*` or the network lives in `lib.js`, so it
+can be tested directly with Node's built-in test runner. Nothing to install:
+
+```bash
+npm test       # run the test suites
+npm run check  # parse-check the extension scripts
+```
+
+CI runs both on every push and pull request.
 
 ## Contributing
 

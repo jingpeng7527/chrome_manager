@@ -2,13 +2,14 @@
   "manifest_version": 3,
   "name": "Chrome Manager Agent",
   "version": "0.1.0",
-  "description": "Manage Chrome tabs with natural language via a local AI backend.",
+  "description": "Manage Chrome tabs with natural language.",
   "action": {
     "default_title": "Chrome Agent",
     "default_popup": "pop_up.html"
   },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "permissions": [
     "tabs",
