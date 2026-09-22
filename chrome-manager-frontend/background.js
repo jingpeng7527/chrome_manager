@@ -2,6 +2,7 @@ import {
   buildUserMessage,
   commandsFromLabels,
   findLocalCommands,
+  groqErrorMessage,
   isGroupingRequest,
   parseCommands,
   parseLabels,
@@ -34,7 +35,13 @@ async function callGroq(apiKey, tabs, groups, userPrompt) {
     // groups; inference on shared hardware still varies a little.
     temperature: 0,
     seed: 7,
-    max_completion_tokens: 2048,
+    max_completion_tokens: 4096,
+    // gpt-oss reasons before answering. JSON mode rejects reasoning_format
+    // "raw", and hiding the reasoning keeps the reply channel to just the JSON;
+    // low effort leaves more of the token budget for that JSON, which has to
+    // arrive complete or Groq's validator refuses the whole response.
+    reasoning_format: 'hidden',
+    reasoning_effort: 'low',
     response_format: { type: 'json_object' },
     messages: [
       { role: 'system', content: labelling ? SYSTEM_PROMPT_LABELS : SYSTEM_PROMPT },
@@ -61,8 +68,8 @@ async function callGroq(apiKey, tabs, groups, userPrompt) {
   }
 
   if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `Groq error: ${response.status}`);
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(groqErrorMessage(payload, response.status));
   }
 
   const data = await response.json();

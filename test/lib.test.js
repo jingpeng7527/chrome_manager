@@ -5,6 +5,7 @@ import {
   buildUserMessage,
   commandsFromLabels,
   findLocalCommands,
+  groqErrorMessage,
   hostMatches,
   isGroupingRequest,
   parseCommands,
@@ -340,6 +341,33 @@ describe('buildUserMessage', () => {
 
   it('says "none" when there are no groups', () => {
     assert.match(buildUserMessage([], [], 'hi'), /Existing groups:\nnone/);
+  });
+});
+
+describe('groqErrorMessage', () => {
+  it('appends what the model produced when JSON mode rejects a reply', () => {
+    // The real shape of a JSON-mode rejection. Reading only error.message
+    // reports "adjust your prompt" and silently drops the evidence of why.
+    const payload = {
+      error: {
+        message: "Failed to validate JSON. Please adjust your prompt. See 'failed_generation' for more details.",
+        failed_generation: '{"labels": {"1": "Cloud Console", "2": "Cloud',
+      },
+    };
+    const message = groqErrorMessage(payload, 400);
+    assert.match(message, /Failed to validate JSON/);
+    assert.match(message, /\{"labels": \{"1": "Cloud Console"/, 'must show the truncated output');
+  });
+
+  it('truncates a very long failed generation', () => {
+    const payload = { error: { message: 'bad', failed_generation: 'x'.repeat(5000) } };
+    assert.ok(groqErrorMessage(payload, 400).length < 300);
+  });
+
+  it('falls back to the status when the body is unhelpful', () => {
+    assert.equal(groqErrorMessage({}, 500), 'Groq error: 500');
+    assert.equal(groqErrorMessage(null, 502), 'Groq error: 502');
+    assert.equal(groqErrorMessage({ error: { message: 'Invalid API Key' } }, 401), 'Invalid API Key');
   });
 });
 

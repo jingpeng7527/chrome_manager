@@ -263,6 +263,16 @@ export const SYSTEM_PROMPT_LABELS =
   '- Judge each tab on its own line. Do not reorder or renumber the tabs.\n' +
   'Output JSON only — no prose, no markdown fences.';
 
+// When JSON mode rejects a reply, Groq puts the text the model actually
+// produced in error.failed_generation. Reading only error.message throws away
+// the one piece of information that says why.
+export function groqErrorMessage(payload, status) {
+  const err = payload?.error ?? {};
+  const base = err.message || `Groq error: ${status}`;
+  const failed = err.failed_generation;
+  return failed ? `${base} — model produced: ${String(failed).slice(0, 200)}` : base;
+}
+
 // Tabs and groups are presented to the model as 1..N, never as Chrome ids.
 export function buildUserMessage(tabs, groups, userPrompt) {
   const groupIndex = new Map(groups.map((g, i) => [g.id, i + 1]));
