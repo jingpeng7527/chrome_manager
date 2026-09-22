@@ -8,5 +8,8 @@ Thumbs.db
 .history/
 .claude/
 
+# Node
+node_modules/
+
 # Logs
 *.log

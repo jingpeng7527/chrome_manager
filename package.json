@@ -1,0 +1,11 @@
+{
+  "name": "chrome-manager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tests and tooling for the Tab Agent Chrome extension",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check chrome-manager-frontend/background.js && node --check chrome-manager-frontend/lib.js && node --check chrome-manager-frontend/pop_up.js"
+  }
+}
