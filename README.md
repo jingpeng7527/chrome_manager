@@ -16,18 +16,22 @@ Too many tabs open? Tab Agent lets you group, close, and organize them using nat
 - **Natural language commands** — just describe what you want
 - **Group tabs** by topic, domain, or any criteria
 - **Ungroup, duplicate, or close** tabs in bulk
+- **Instant for common commands** — naming a site or closing duplicates is matched locally, with no API call at all
 - **Aware of existing groups** — adds to them instead of creating duplicates
 - **No backend required** — calls the Groq API directly from the extension
-- **Free** — Groq's free tier supports 1,000+ requests/day
+- **Free** — Groq's free tier covers ordinary use
 
 ## Demo
 
 | Command | Result |
 |---|---|
-| `Group all GitHub tabs` | Groups every tab on github.com |
-| `Close duplicate tabs` | Removes tabs you have open more than once |
-| `Ungroup everything` | Moves all tabs out of their groups |
-| `Group tabs by topic` | Creates multiple thematic groups |
+| `group github` | Groups every tab on github.com — a search *about* GitHub is not included |
+| `close duplicates` | Closes tabs open at the same URL more than once |
+| `ungroup all` | Moves every tab out of its group, closing nothing |
+| `group by topic` | Reads the tabs and creates several named groups |
+
+The site name can be written however you like: `group stripe`, `group all
+stripe tabs` and `group my stripe pages` all do the same thing.
 
 ## Getting started
 
@@ -52,11 +56,21 @@ Type a command in the popup and press **Enter** (or click the ↑ button). Use t
 
 ## How it works
 
-```
-User prompt + tab list → Groq API (llama-3.3-70b-versatile) → JSON commands → Chrome APIs
-```
+Most commands never reach the network. A request that names a site, or asks for
+a plain operation, is matched locally and runs immediately:
 
-The extension collects your open tabs (ID, title, URL, current group), sends them to the Groq API along with your prompt, and executes the returned commands using Chrome's `tabs` and `tabGroups` APIs.
+| Command | Path | Cost |
+|---|---|---|
+| `group stripe`, `ungroup all`, `close duplicates` | matched in `lib.js` | instant, no API call |
+| `group by topic` | Groq (`openai/gpt-oss-120b`) | a second or two |
+
+Anything needing judgement goes to the model. Rather than asking it to build
+arrays of tab ids — which is where models reliably go wrong, mixing tabs
+between groups — it is asked for **one topic label per tab**, and the code
+decides which tabs end up together. A mislabelled tab can then only move
+itself.
+
+Tabs are shown to the model numbered `1..N`; raw Chrome tab ids never reach it.
 
 ## Project structure
 
@@ -75,15 +89,57 @@ test/                      # Node test-runner suites, no dependencies
 
 ## Development
 
-Everything that does not touch `chrome.*` or the network lives in `lib.js`, so it
-can be tested directly with Node's built-in test runner. Nothing to install:
+No dependencies, no build step. Tests run on Node's built-in test runner
+(Node 18+):
 
 ```bash
-npm test       # run the test suites
+npm test       # run both suites
 npm run check  # parse-check the extension scripts
 ```
 
 CI runs both on every push and pull request.
+
+### How the code is split
+
+`background.js` cannot be imported by a test — it calls `chrome.*` on load and
+registers a message listener. So everything decidable without a browser lives
+in `lib.js`: site matching, parsing model replies, turning replies into
+commands, and building the prompt. `background.js` imports it and keeps only
+the Chrome and network calls.
+
+That is also why `manifest.json` sets `"background": { "type": "module" }`.
+Without it Chrome refuses to start the service worker, and the extension dies
+silently.
+
+### What the tests cover
+
+**`test/lib.test.js`** — site matching, model-reply parsing, group building.
+Every bug this project has hit has a test pinning it, each marked with a
+`Regression:` comment naming the failure it prevents:
+
+- a Google search *about* GitHub joining the GitHub group
+- `netflix.com` matching a request for `x.com`
+- "close duplicates" closing two *different* YouTube videos
+- the model running three 10-digit tab ids together into one number
+- a single mislabelled tab becoming a group of its own
+- `chrome://` urls all reaching the model as the literal string `"null"`
+
+**`test/manifest.test.js`** — what an extension has no build step to catch:
+that the manifest points at files which exist, that the service worker is
+declared a module while it uses imports, that `host_permissions` covers every
+URL `background.js` calls, and that every element `pop_up.js` looks up is
+present in the HTML.
+
+### Adding a test
+
+New logic belongs in `lib.js` if it can be decided without a browser — that is
+what makes it testable at all.
+
+After writing a test, break the thing it guards and confirm it actually fails.
+A check that cannot fail is worse than no check, because it reads like
+coverage. One test in this suite was silently vacuous until it was verified
+that way: it matched `import ... from` on a single line, while the code it
+guarded used a multi-line import.
 
 ## Contributing
 
