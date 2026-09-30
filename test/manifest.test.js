@@ -43,6 +43,14 @@ describe('manifest.json', () => {
     }
   });
 
+  it('has a service worker that only imports files that exist', () => {
+    const specs = [...read(manifest.background.service_worker).matchAll(/from\s+['"](\.\/[^'"]+)['"]/g)]
+      .map((m) => m[1]);
+    for (const spec of specs) {
+      assert.ok(existsSync(join(EXT_DIR, spec)), `background.js imports missing file: ${spec}`);
+    }
+  });
+
   it('requests only the permissions the code relies on', () => {
     for (const permission of ['tabs', 'tabGroups', 'storage']) {
       assert.ok(manifest.permissions.includes(permission), `missing permission: ${permission}`);
@@ -65,16 +73,34 @@ describe('manifest.json', () => {
 });
 
 describe('popup', () => {
-  it('loads the script it needs and defines the elements that script looks up', () => {
-    const html = read(manifest.action.default_popup);
-    assert.match(html, /<script src="pop_up\.js">/);
+  const html = read(manifest.action.default_popup);
+  const script = read('pop_up.js');
 
-    const ids = [...read('pop_up.js').matchAll(/getElementById\(['"]([^'"]+)['"]\)/g)]
-      .map((m) => m[1]);
+  it('loads its script', () => {
+    assert.match(html, /<script[^>]*src="pop_up\.js"/);
+  });
+
+  it('loads the script as a module when it uses imports', () => {
+    // The popup runs local commands itself, which means importing lib.js. A
+    // plain <script> tag cannot, and the popup would break at load.
+    if (/^\s*import\b[\s\S]*?\bfrom\s+['"]/m.test(script)) {
+      assert.match(html, /<script[^>]*type="module"[^>]*src="pop_up\.js"/);
+    }
+  });
+
+  it('defines every element the script looks up', () => {
+    const ids = [...script.matchAll(/getElementById\(['"]([^'"]+)['"]\)/g)].map((m) => m[1]);
 
     assert.ok(ids.length > 0, 'expected the popup script to look up some elements');
     for (const id of new Set(ids)) {
       assert.ok(html.includes(`id="${id}"`), `pop_up.js reads #${id}, missing from the HTML`);
+    }
+  });
+
+  it('only imports files that exist', () => {
+    const specs = [...script.matchAll(/from\s+['"](\.\/[^'"]+)['"]/g)].map((m) => m[1]);
+    for (const spec of specs) {
+      assert.ok(existsSync(join(EXT_DIR, spec)), `pop_up.js imports missing file: ${spec}`);
     }
   });
 });

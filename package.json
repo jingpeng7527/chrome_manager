@@ -6,6 +6,6 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "check": "node --check chrome-manager-frontend/background.js && node --check chrome-manager-frontend/lib.js && node --check chrome-manager-frontend/pop_up.js"
+    "check": "for f in chrome-manager-frontend/*.js; do node --check \"$f\" || exit 1; done"
   }
 }
