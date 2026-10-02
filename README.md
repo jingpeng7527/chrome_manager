@@ -85,6 +85,11 @@ chrome-manager-frontend/   # The Chrome extension
 test/                      # Node test-runner suites, no dependencies
 ├── lib.test.js            # Tab matching, model-reply parsing, grouping
 └── manifest.test.js       # Manifest and popup wiring
+
+e2e/                       # Drives the real extension in a real browser
+├── run.mjs                # The checks
+├── browser.mjs            # Finds/downloads Chrome for Testing, launches it
+└── cdp.mjs                # Minimal DevTools Protocol client
 ```
 
 ## Development
@@ -129,6 +134,33 @@ that the manifest points at files which exist, that the service worker is
 declared a module while it uses imports, that `host_permissions` covers every
 URL `background.js` calls, and that every element `pop_up.js` looks up is
 present in the HTML.
+
+### End-to-end check
+
+The unit tests cannot tell you whether Chrome actually starts the extension.
+`npm run e2e` loads the built extension into a real browser, drives it over the
+DevTools Protocol, and checks the things only a browser can answer:
+
+```bash
+npm run e2e
+```
+
+- the ES-module service worker and popup start, with no exceptions
+- a command produces a real Chrome tab group holding the right tabs
+- a command needing no model runs **without waking the service worker**, and
+  one needing the model does wake it
+
+Hostnames such as `docs.stripe.com` are pointed at a local fixture server, so
+the run makes no external requests. The first run downloads Chrome for Testing
+(~370 MB) into `~/.cache/chrome-manager-e2e`; later runs reuse it.
+
+It is deliberately not part of `npm test` or CI, which stay dependency-free and
+finish in seconds.
+
+> Regular Chrome cannot be used here. `--load-extension` was removed in Chrome
+> 154: it is silently ignored in both headless and headed mode, and
+> `chrome://extensions` then reports no extensions at all. Chrome for Testing
+> has no such restriction, which is why the script fetches it.
 
 ### Adding a test
 

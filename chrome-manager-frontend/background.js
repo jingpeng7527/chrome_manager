@@ -10,6 +10,7 @@ import {
   SYSTEM_PROMPT,
   SYSTEM_PROMPT_LABELS,
 } from './lib.js';
+import { collectTabState, executeCommands } from './chrome-api.js';
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODELS_URL = 'https://api.groq.com/openai/v1/models';
@@ -129,16 +130,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     try {
       const { prompt } = message;
-      const tabs = await chrome.tabs.query({ currentWindow: true });
-      const tabData = tabs.map((tab) => ({
-        id: tab.id,
-        title: tab.title,
-        url: tab.url,
-        groupId: tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE ? tab.groupId : null,
-      }));
-
-      const groups = await chrome.tabGroups.query({ windowId: chrome.windows.WINDOW_ID_CURRENT });
-      const groupData = groups.map((g) => ({ id: g.id, title: g.title }));
+      const { tabs: tabData, groups: groupData } = await collectTabState();
 
       let commands = findLocalCommands(prompt, tabData, groupData);
       const usedAI = commands === null;
@@ -156,17 +148,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         aiRaw = res.raw;
       }
 
-      let failed = 0;
-      for (const command of commands) {
-        try {
-          await executeChromeCommand(command);
-        } catch (cmdError) {
-          failed++;
-          console.error('Command failed:', command.action, cmdError?.message ?? String(cmdError));
-        }
-      }
-
-      const succeeded = commands.length - failed;
+      const { succeeded, failed } = await executeCommands(commands);
       if (commands.length > 0) {
         const summary = failed > 0
           ? `Done: ${succeeded} command(s) succeeded, ${failed} failed`
@@ -191,29 +173,3 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return true;
 });
-
-async function executeChromeCommand(command) {
-  const action = command.action ?? command.command;
-  switch (action) {
-    case 'group': {
-      const options = { tabIds: command.tabIds };
-      if (command.groupId) options.groupId = command.groupId;
-      const groupId = await chrome.tabs.group(options);
-      if (!command.groupId) {
-        await chrome.tabGroups.update(groupId, { title: command.title || 'AI Group' });
-      }
-      break;
-    }
-    case 'ungroup':
-      await chrome.tabs.ungroup(command.tabIds);
-      break;
-    case 'duplicate':
-      await chrome.tabs.duplicate(command.tabId);
-      break;
-    case 'remove':
-      await chrome.tabs.remove(command.tabId);
-      break;
-    default:
-      console.warn('Unknown action:', action, command);
-  }
-}
