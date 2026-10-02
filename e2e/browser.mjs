@@ -62,10 +62,10 @@ export function startFixtureServer(port) {
   });
 }
 
-export async function launch({ binary, extensionDir, profileDir, hosts, port }) {
+export async function launch({ binary, extensionDir, profileDir, hosts, port, headless = true }) {
   const mapping = hosts.map((h) => `MAP ${h} 127.0.0.1:${port}`).join(', ');
   const child = spawn(binary, [
-    '--headless=new',
+    ...(headless ? ['--headless=new'] : ['--window-position=-3000,-3000', '--window-size=500,400']),
     '--remote-debugging-port=9222',
     `--user-data-dir=${profileDir}`,
     `--load-extension=${extensionDir}`,

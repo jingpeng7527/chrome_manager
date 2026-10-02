@@ -21,6 +21,7 @@ const EXT_ID = extensionId(EXT_DIR);
 const PORT = 7801;
 const HOSTS = ['docs.stripe.com', 'github.com', 'example.com'];
 const RUNS = 3;
+const OPEN_RUNS = 12;   // opening is noisy; the median needs samples
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
@@ -66,34 +67,70 @@ async function timeCommand(command) {
   });
 }
 
-// How long the popup takes to appear after the toolbar icon is clicked. This
-// is measured separately from command latency on purpose: a change can make
-// commands faster while making every single open slower, which is a bad trade
-// and easy to miss if only commands are timed.
-async function reportOpen() {
+// Times the real popup, from the click through to pixels.
+//
+// Opening pop_up.html as a tab measures the wrong thing: it skips Chrome
+// constructing the popup window, which turns out to be most of the wait.
+// chrome.action.openPopup() makes Chrome build the genuine popup instead.
+//
+// timeOrigin and Date.now() are both epoch milliseconds, so the gap between
+// the call and the popup's own timeline start is the construction, and FCP on
+// top of it is the render.
+async function reportOpen(worker) {
+  const constructs = [];
   const paints = [];
-  const loads = [];
 
-  for (let i = 0; i < RUNS + 2; i++) {
-    const target = await openTarget(`chrome-extension://${EXT_ID}/pop_up.html`);
+  for (let i = 0; i < OPEN_RUNS; i++) {
+    const t0 = Date.now();
+    await evaluate(worker, `chrome.action.openPopup().then(() => 'ok').catch((e) => e.message)`);
+
+    let target;
+    for (let w = 0; w < 100 && !target; w++) {
+      target = (await listTargets()).find((t) => t.type === 'page' && t.url.includes(`${EXT_ID}/pop_up.html`));
+      if (!target) await sleep(20);
+    }
+    if (!target) continue;
+
     const popup = connect(target.webSocketDebuggerUrl);
     await popup.send('Runtime.enable');
-    await sleep(600);
+    await sleep(400);
     const m = await evaluate(popup, `(() => {
-      const nav = performance.getEntriesByType('navigation')[0];
       const paint = performance.getEntriesByName('first-contentful-paint')[0];
-      return { fcp: paint ? Math.round(paint.startTime) : null, dcl: Math.round(nav.domContentLoadedEventEnd) };
+      return { origin: performance.timeOrigin, fcp: paint ? paint.startTime : null };
     })()`);
-    if (m.fcp != null) paints.push(m.fcp);
-    loads.push(m.dcl);
+
+    // A popup Chrome reused carries the previous run's timeline, so its origin
+    // predates this run. Discard it rather than record the wrong thing.
+    if (m.origin >= t0 && m.fcp != null) {
+      constructs.push(Math.round(m.origin - t0));
+      paints.push(Math.round(m.fcp));
+    }
+
+    // An extension popup is not a window chrome.windows will remove; it has to
+    // close itself.
+    await evaluate(popup, 'window.close()').catch(() => {});
     popup.close();
-    await closeTarget(target.id);
-    await sleep(250);
+    for (let w = 0; w < 50; w++) {
+      const open = (await listTargets()).some((t) => t.type === 'page' && t.url.includes(`${EXT_ID}/pop_up.html`));
+      if (!open) break;
+      await sleep(100);
+    }
+    await sleep(400);
   }
 
-  console.log(`  first contentful paint : ${String(median(paints)).padStart(6)} ms   ${JSON.stringify(paints)}`);
-  console.log(`  DOMContentLoaded       : ${String(median(loads)).padStart(6)} ms   ${JSON.stringify(loads)}\n`);
-  return median(paints);
+  if (!constructs.length) {
+    console.log('  no valid runs — every popup was reused\n');
+    return null;
+  }
+
+  const totals = constructs.map((c, i) => c + paints[i]);
+  console.log(`  counted                : ${constructs.length}/${OPEN_RUNS} runs`);
+  console.log('  (noisy: the same build measures anywhere from ~300 to ~1000 ms');
+  console.log('   run to run. Read the split, not the absolute number.)');
+  console.log(`  Chrome builds the window:${String(median(constructs)).padStart(6)} ms   ${JSON.stringify(constructs)}`);
+  console.log(`  this extension renders  :${String(median(paints)).padStart(6)} ms   ${JSON.stringify(paints)}`);
+  console.log(`  TOTAL click -> pixels   :${String(median(totals)).padStart(6)} ms\n`);
+  return median(totals);
 }
 
 async function report(label, command) {
@@ -118,6 +155,13 @@ try {
   });
   await sleep(2000);
 
+  console.log('\nopening the popup\n');
+  const workerTarget = (await listTargets()).find((t) => t.type === 'service_worker' && t.url.includes(EXT_ID));
+  const worker = connect(workerTarget.webSocketDebuggerUrl);
+  await worker.send('Runtime.enable');
+  const open = await reportOpen(worker);
+  worker.close();
+
   await withPopup(async (popup) => {
     await evaluate(popup, `(async () => {
       for (const url of ['http://docs.stripe.com/a', 'http://docs.stripe.com/b', 'http://github.com/c'])
@@ -132,9 +176,6 @@ try {
       await evaluate(popup, `new Promise((r) => chrome.storage.local.set({ groqApiKey: ${JSON.stringify(key)} }, r))`);
     });
   }
-
-  console.log('\nopening the popup\n');
-  const open = await reportOpen();
 
   console.log('cold service worker, time from click to the status settling\n');
   const local = await report('local  ', 'group stripe');

@@ -173,10 +173,26 @@ npm run bench                          # local commands only
 GROQ_API_KEY=gsk_... npm run bench     # also times the model path
 ```
 
-The model path needs a key because that request is the thing worth timing.
-Everything the extension itself does is a few milliseconds; the wait is Groq's.
-The popup also reports its own timing in the status line once a command
-finishes, so a slow request can be read off without running anything.
+It reports three things:
+
+| | typical | who controls it |
+|---|---|---|
+| opening the popup | ~300 ms, mostly Chrome building the window | Chrome |
+| a local command | ~12 ms | this extension |
+| a model command | needs `GROQ_API_KEY` | Groq |
+
+Opening is measured through `chrome.action.openPopup()`, which makes Chrome
+build the real popup. Loading `pop_up.html` as a tab looks faster because it
+skips exactly the part that dominates the wait.
+
+That number is noisy — the same build lands anywhere from ~300 ms to ~1000 ms
+between runs — so it is only worth reading as a split: Chrome's window
+construction against this extension's render, which is a small fraction of it.
+Comparing two builds needs a dozen runs each and a healthy suspicion of any
+difference under ~50 ms.
+
+The popup also reports its own open time in the header, and its command timing
+in the status line, so the browser you actually use can be read directly.
 
 ### Adding a test
 
