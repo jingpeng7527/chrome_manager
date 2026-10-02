@@ -1,6 +1,3 @@
-import { findLocalCommands } from './lib.js';
-import { collectTabState, executeCommands } from './chrome-api.js';
-
 const statusBar = document.getElementById('statusBar');
 const statusText = document.getElementById('statusText');
 
@@ -86,6 +83,13 @@ function refreshTabCount() {
 // Chrome shuts that worker down after about 30s idle, so routing through it
 // would make every "ungroup all" wait on a cold start it does not need.
 async function runLocally(prompt) {
+    // Loaded on demand rather than at startup. As static imports these cost
+    // the popup roughly 60ms of extra open time on every click, with a long
+    // tail approaching a second; by the time a command is submitted the user
+    // has been typing for seconds and will not notice the load.
+    const [{ findLocalCommands }, { collectTabState, executeCommands }] =
+        await Promise.all([import('./lib.js'), import('./chrome-api.js')]);
+
     const { tabs, groups } = await collectTabState();
     const commands = findLocalCommands(prompt, tabs, groups);
     if (commands === null) return false; // needs the model

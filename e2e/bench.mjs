@@ -66,6 +66,36 @@ async function timeCommand(command) {
   });
 }
 
+// How long the popup takes to appear after the toolbar icon is clicked. This
+// is measured separately from command latency on purpose: a change can make
+// commands faster while making every single open slower, which is a bad trade
+// and easy to miss if only commands are timed.
+async function reportOpen() {
+  const paints = [];
+  const loads = [];
+
+  for (let i = 0; i < RUNS + 2; i++) {
+    const target = await openTarget(`chrome-extension://${EXT_ID}/pop_up.html`);
+    const popup = connect(target.webSocketDebuggerUrl);
+    await popup.send('Runtime.enable');
+    await sleep(600);
+    const m = await evaluate(popup, `(() => {
+      const nav = performance.getEntriesByType('navigation')[0];
+      const paint = performance.getEntriesByName('first-contentful-paint')[0];
+      return { fcp: paint ? Math.round(paint.startTime) : null, dcl: Math.round(nav.domContentLoadedEventEnd) };
+    })()`);
+    if (m.fcp != null) paints.push(m.fcp);
+    loads.push(m.dcl);
+    popup.close();
+    await closeTarget(target.id);
+    await sleep(250);
+  }
+
+  console.log(`  first contentful paint : ${String(median(paints)).padStart(6)} ms   ${JSON.stringify(paints)}`);
+  console.log(`  DOMContentLoaded       : ${String(median(loads)).padStart(6)} ms   ${JSON.stringify(loads)}\n`);
+  return median(paints);
+}
+
 async function report(label, command) {
   const results = [];
   for (let i = 0; i < RUNS; i++) {
@@ -103,17 +133,22 @@ try {
     });
   }
 
-  console.log('\ncold service worker, time from click to the status settling\n');
+  console.log('\nopening the popup\n');
+  const open = await reportOpen();
+
+  console.log('cold service worker, time from click to the status settling\n');
   const local = await report('local  ', 'group stripe');
 
   if (key) {
     const model = await report('model  ', 'group by topic');
     console.log('summary');
+    console.log(`  popup opens    : ${open} ms`);
     console.log(`  local command  : ${local} ms`);
     console.log(`  model command  : ${model} ms`);
     console.log(`  cost of the model: ${model - local} ms of the wait is Groq`);
   } else {
     console.log('summary');
+    console.log(`  popup opens    : ${open} ms`);
     console.log(`  local command  : ${local} ms`);
     console.log('  model command  : skipped — set GROQ_API_KEY to measure it');
   }
