@@ -20,6 +20,19 @@ function loadLastStatus() {
     });
 }
 
+// How long this popup took to open, reported from the browser it actually
+// opened in. Measuring it from an automated harness understates it: that opens
+// the page as a tab and never pays for Chrome constructing the popup window.
+function showOpenTime() {
+    window.addEventListener('load', () => {
+        const nav = performance.getEntriesByType('navigation')[0];
+        const ms = Math.round(nav?.loadEventEnd || performance.now());
+        if (!ms) return;
+        const el = document.getElementById('openTime');
+        if (el) el.textContent = `${ms} ms`;
+    });
+}
+
 // Load saved key
 chrome.storage.local.get('groqApiKey', (data) => {
     if (data.groqApiKey) document.getElementById('apiKeyInput').value = data.groqApiKey;
@@ -27,6 +40,7 @@ chrome.storage.local.get('groqApiKey', (data) => {
 
 loadLastStatus();
 refreshTabCount();
+showOpenTime();
 
 // Example chips
 document.querySelectorAll('.example-chip').forEach((chip) => {
