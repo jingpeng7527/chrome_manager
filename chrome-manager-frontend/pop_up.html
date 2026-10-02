@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <title>Chrome Agent</title>
+    <!-- Resolve DNS and complete the TLS handshake while the user is still
+         typing, so the first model request of a session does not pay for it. -->
+    <link rel="preconnect" href="https://api.groq.com" crossorigin>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
 

@@ -7,6 +7,7 @@
   "scripts": {
     "test": "node --test",
     "check": "for f in chrome-manager-frontend/*.js; do node --check \"$f\" || exit 1; done",
-    "e2e": "node e2e/run.mjs"
+    "e2e": "node e2e/run.mjs",
+    "bench": "node e2e/bench.mjs"
   }
 }

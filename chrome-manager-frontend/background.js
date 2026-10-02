@@ -17,6 +17,11 @@ const GROQ_MODELS_URL = 'https://api.groq.com/openai/v1/models';
 const GROQ_MODEL = 'openai/gpt-oss-120b';
 const REQUEST_TIMEOUT_MS = 30000;
 
+// Chrome shuts an idle service worker down and restarts it on the next
+// message. Comparing this to the moment a request arrives shows how much of
+// that request was spent waiting for the worker to come back.
+const WORKER_STARTED_AT = Date.now();
+
 function saveLastStatus(text) {
   chrome.storage.local.set({ lastStatus: { text, updatedAt: Date.now() } });
 }
@@ -53,6 +58,7 @@ async function callGroq(apiKey, tabs, groups, userPrompt) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
+  const apiStart = Date.now();
   let response;
   try {
     response = await fetch(GROQ_URL, {
@@ -74,6 +80,7 @@ async function callGroq(apiKey, tabs, groups, userPrompt) {
   }
 
   const data = await response.json();
+  const apiMs = Date.now() - apiStart;
   const msg = data.choices?.[0]?.message ?? {};
   // gpt-oss is a reasoning model: if the whole reply landed in the reasoning
   // channel, content comes back empty and the JSON is over in `reasoning`.
@@ -84,7 +91,7 @@ async function callGroq(apiKey, tabs, groups, userPrompt) {
     ? commandsFromLabels(parseLabels(text), tabs, groups)
     : resolveIndexes(parseCommands(text), tabs, groups);
 
-  return { commands, raw: text };
+  return { commands, raw: text, apiMs };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -128,6 +135,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   (async () => {
+    const requestStart = Date.now();
+    // Small when Chrome had just restarted the worker for this very request.
+    const sinceWorkerStart = requestStart - WORKER_STARTED_AT;
+
     try {
       const { prompt } = message;
       const { tabs: tabData, groups: groupData } = await collectTabState();
@@ -135,6 +146,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       let commands = findLocalCommands(prompt, tabData, groupData);
       const usedAI = commands === null;
       let aiRaw = '';
+      let apiMs = 0;
 
       if (usedAI) {
         const apiKey = await getApiKey();
@@ -146,9 +158,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const res = await callGroq(apiKey, tabData, groupData, prompt);
         commands = res.commands;
         aiRaw = res.raw;
+        apiMs = res.apiMs;
       }
 
       const { succeeded, failed } = await executeCommands(commands);
+      const totalMs = Date.now() - requestStart;
+      // Logged rather than shown: useful when a request feels slow, and it
+      // separates waiting on Groq from everything this extension controls.
+      console.log('timing', JSON.stringify({
+        totalMs, apiMs, workerWaitMs: sinceWorkerStart < 1000 ? sinceWorkerStart : 0,
+      }));
+
       if (commands.length > 0) {
         const summary = failed > 0
           ? `Done: ${succeeded} command(s) succeeded, ${failed} failed`
@@ -160,7 +180,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           : 'Nothing to do');
       }
 
-      sendResponse({ ok: true, commandCount: succeeded, usedAI, aiRaw });
+      sendResponse({ ok: true, commandCount: succeeded, usedAI, aiRaw, totalMs, apiMs });
     } catch (error) {
       const msg = error?.name === 'AbortError'
         ? 'Groq timeout after 30s'

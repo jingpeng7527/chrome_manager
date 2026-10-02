@@ -141,7 +141,11 @@ async function runAgent() {
         }
 
         if (result.commandCount > 0) {
-            setStatus(`Done — ${result.commandCount} action(s) executed`, 'ok');
+            // Show where a slow request went: "3.1s" alone invites guessing,
+            // "3.1s, 2.9s waiting on Groq" does not.
+            const took = result.totalMs ? ` in ${(result.totalMs / 1000).toFixed(1)}s` : '';
+            const api = result.apiMs ? ` (${(result.apiMs / 1000).toFixed(1)}s waiting on Groq)` : '';
+            setStatus(`Done — ${result.commandCount} action(s)${took}${api}`, 'ok');
         } else {
             setStatus(
                 result.usedAI

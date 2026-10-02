@@ -88,6 +88,7 @@ test/                      # Node test-runner suites, no dependencies
 
 e2e/                       # Drives the real extension in a real browser
 ├── run.mjs                # The checks
+├── bench.mjs              # Times commands with a cold service worker
 ├── browser.mjs            # Finds/downloads Chrome for Testing, launches it
 └── cdp.mjs                # Minimal DevTools Protocol client
 ```
@@ -161,6 +162,21 @@ finish in seconds.
 > 154: it is silently ignored in both headless and headed mode, and
 > `chrome://extensions` then reports no extensions at all. Chrome for Testing
 > has no such restriction, which is why the script fetches it.
+
+### Measuring
+
+`npm run bench` times commands in a real browser with the service worker cold —
+the state a click lands in after a pause:
+
+```bash
+npm run bench                          # local commands only
+GROQ_API_KEY=gsk_... npm run bench     # also times the model path
+```
+
+The model path needs a key because that request is the thing worth timing.
+Everything the extension itself does is a few milliseconds; the wait is Groq's.
+The popup also reports its own timing in the status line once a command
+finishes, so a slow request can be read off without running anything.
 
 ### Adding a test
 
