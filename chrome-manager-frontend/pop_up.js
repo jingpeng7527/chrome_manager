@@ -20,16 +20,23 @@ function loadLastStatus() {
     });
 }
 
-// How long this popup took to open, reported from the browser it actually
-// opened in. Measuring it from an automated harness understates it: that opens
-// the page as a tab and never pays for Chrome constructing the popup window.
-function showOpenTime() {
+// How long this document took to render — NOT how long the popup took to
+// appear. The popup's clock starts after Chrome has already built the window,
+// and that construction is roughly ten times this number. Nothing inside an
+// extension can observe the click that starts it, so the figure a user waits
+// on can only be measured externally, by recording the screen.
+function showRenderTime() {
     window.addEventListener('load', () => {
         const nav = performance.getEntriesByType('navigation')[0];
         const ms = Math.round(nav?.loadEventEnd || performance.now());
         if (!ms) return;
         const el = document.getElementById('openTime');
-        if (el) el.textContent = `${ms} ms`;
+        if (el) {
+            el.textContent = `render ${ms} ms`;
+            el.title = 'Time to render this popup. Chrome spends roughly ten times '
+                + 'as long building the popup window before this clock starts, and '
+                + 'that part cannot be measured from inside the extension.';
+        }
     });
 }
 
@@ -40,7 +47,7 @@ chrome.storage.local.get('groqApiKey', (data) => {
 
 loadLastStatus();
 refreshTabCount();
-showOpenTime();
+showRenderTime();
 
 // Example chips
 document.querySelectorAll('.example-chip').forEach((chip) => {
