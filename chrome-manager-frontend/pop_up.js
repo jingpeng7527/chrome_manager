@@ -1,6 +1,3 @@
-import { findLocalCommands } from './lib.js';
-import { collectTabState, executeCommands } from './chrome-api.js';
-
 const statusBar = document.getElementById('statusBar');
 const statusText = document.getElementById('statusText');
 
@@ -23,6 +20,19 @@ function loadLastStatus() {
     });
 }
 
+// How long this popup took to open, reported from the browser it actually
+// opened in. Measuring it from an automated harness understates it: that opens
+// the page as a tab and never pays for Chrome constructing the popup window.
+function showOpenTime() {
+    window.addEventListener('load', () => {
+        const nav = performance.getEntriesByType('navigation')[0];
+        const ms = Math.round(nav?.loadEventEnd || performance.now());
+        if (!ms) return;
+        const el = document.getElementById('openTime');
+        if (el) el.textContent = `${ms} ms`;
+    });
+}
+
 // Load saved key
 chrome.storage.local.get('groqApiKey', (data) => {
     if (data.groqApiKey) document.getElementById('apiKeyInput').value = data.groqApiKey;
@@ -30,6 +40,7 @@ chrome.storage.local.get('groqApiKey', (data) => {
 
 loadLastStatus();
 refreshTabCount();
+showOpenTime();
 
 // Example chips
 document.querySelectorAll('.example-chip').forEach((chip) => {
@@ -86,6 +97,13 @@ function refreshTabCount() {
 // Chrome shuts that worker down after about 30s idle, so routing through it
 // would make every "ungroup all" wait on a cold start it does not need.
 async function runLocally(prompt) {
+    // Loaded on demand rather than at startup. As static imports these cost
+    // the popup roughly 60ms of extra open time on every click, with a long
+    // tail approaching a second; by the time a command is submitted the user
+    // has been typing for seconds and will not notice the load.
+    const [{ findLocalCommands }, { collectTabState, executeCommands }] =
+        await Promise.all([import('./lib.js'), import('./chrome-api.js')]);
+
     const { tabs, groups } = await collectTabState();
     const commands = findLocalCommands(prompt, tabs, groups);
     if (commands === null) return false; // needs the model
@@ -141,7 +159,11 @@ async function runAgent() {
         }
 
         if (result.commandCount > 0) {
-            setStatus(`Done — ${result.commandCount} action(s) executed`, 'ok');
+            // Show where a slow request went: "3.1s" alone invites guessing,
+            // "3.1s, 2.9s waiting on Groq" does not.
+            const took = result.totalMs ? ` in ${(result.totalMs / 1000).toFixed(1)}s` : '';
+            const api = result.apiMs ? ` (${(result.apiMs / 1000).toFixed(1)}s waiting on Groq)` : '';
+            setStatus(`Done — ${result.commandCount} action(s)${took}${api}`, 'ok');
         } else {
             setStatus(
                 result.usedAI

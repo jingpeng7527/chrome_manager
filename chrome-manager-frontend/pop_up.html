@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <title>Chrome Agent</title>
+    <!-- Resolve DNS and complete the TLS handshake while the user is still
+         typing, so the first model request of a session does not pay for it. -->
+    <link rel="preconnect" href="https://api.groq.com" crossorigin>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -43,6 +46,11 @@
             font-weight: 600;
             font-size: 14px;
             color: #fff;
+        }
+
+        .open-time {
+            font-size: 10px;
+            color: #555;
         }
 
         .tab-count {
@@ -242,6 +250,7 @@
             <div class="logo">⬡</div>
             <span class="title">Tab Agent</span>
             <span class="tab-count" id="tabCount">— tabs</span>
+            <span class="open-time" id="openTime"></span>
         </div>
         <button class="key-btn" id="openKeyModal">API Key</button>
     </div>
@@ -281,6 +290,6 @@
         </div>
     </div>
 
-    <script type="module" src="pop_up.js"></script>
+    <script src="pop_up.js"></script>
 </body>
 </html>

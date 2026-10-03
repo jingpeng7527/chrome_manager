@@ -97,10 +97,25 @@ describe('popup', () => {
     }
   });
 
-  it('only imports files that exist', () => {
-    const specs = [...script.matchAll(/from\s+['"](\.\/[^'"]+)['"]/g)].map((m) => m[1]);
+  it('only imports files that exist, static or dynamic', () => {
+    const specs = [
+      ...script.matchAll(/from\s+['"](\.\/[^'"]+)['"]/g),
+      ...script.matchAll(/import\(\s*['"](\.\/[^'"]+)['"]\s*\)/g),
+    ].map((m) => m[1]);
+
+    assert.ok(specs.length > 0, 'expected the popup to pull in its logic');
     for (const spec of specs) {
       assert.ok(existsSync(join(EXT_DIR, spec)), `pop_up.js imports missing file: ${spec}`);
     }
+  });
+
+  it('does not block its own startup on a module graph', () => {
+    // A <script type="module"> makes the popup fetch and resolve lib.js and
+    // chrome-api.js before it can run, which measurably delays every open.
+    // The logic is pulled in with import() when a command is submitted instead.
+    assert.doesNotMatch(script, /^\s*import\b[\s\S]*?\bfrom\s+['"]/m,
+      'pop_up.js should not use top-level imports');
+    assert.doesNotMatch(html, /<script[^>]*type="module"[^>]*src="pop_up\.js"/,
+      'pop_up.html should not load the popup script as a module');
   });
 });

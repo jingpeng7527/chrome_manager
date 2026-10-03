@@ -88,6 +88,7 @@ test/                      # Node test-runner suites, no dependencies
 
 e2e/                       # Drives the real extension in a real browser
 ├── run.mjs                # The checks
+├── bench.mjs              # Times commands with a cold service worker
 ├── browser.mjs            # Finds/downloads Chrome for Testing, launches it
 └── cdp.mjs                # Minimal DevTools Protocol client
 ```
@@ -161,6 +162,37 @@ finish in seconds.
 > 154: it is silently ignored in both headless and headed mode, and
 > `chrome://extensions` then reports no extensions at all. Chrome for Testing
 > has no such restriction, which is why the script fetches it.
+
+### Measuring
+
+`npm run bench` times commands in a real browser with the service worker cold —
+the state a click lands in after a pause:
+
+```bash
+npm run bench                          # local commands only
+GROQ_API_KEY=gsk_... npm run bench     # also times the model path
+```
+
+It reports three things:
+
+| | typical | who controls it |
+|---|---|---|
+| opening the popup | ~300 ms, mostly Chrome building the window | Chrome |
+| a local command | ~12 ms | this extension |
+| a model command | needs `GROQ_API_KEY` | Groq |
+
+Opening is measured through `chrome.action.openPopup()`, which makes Chrome
+build the real popup. Loading `pop_up.html` as a tab looks faster because it
+skips exactly the part that dominates the wait.
+
+That number is noisy — the same build lands anywhere from ~300 ms to ~1000 ms
+between runs — so it is only worth reading as a split: Chrome's window
+construction against this extension's render, which is a small fraction of it.
+Comparing two builds needs a dozen runs each and a healthy suspicion of any
+difference under ~50 ms.
+
+The popup also reports its own open time in the header, and its command timing
+in the status line, so the browser you actually use can be read directly.
 
 ### Adding a test
 
