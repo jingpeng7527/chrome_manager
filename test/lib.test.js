@@ -8,9 +8,11 @@ import {
   groqErrorMessage,
   hostMatches,
   isGroupingRequest,
+  omniboxSuggestions,
   parseCommands,
   parseLabels,
   resolveIndexes,
+  siteNameOf,
   siteTerm,
   SYSTEM_PROMPT,
   SYSTEM_PROMPT_LABELS,
@@ -320,6 +322,65 @@ describe('isGroupingRequest', () => {
   it('leaves other requests on the command format', () => {
     for (const input of ['close all youtube tabs', 'duplicate this tab']) {
       assert.equal(isGroupingRequest(input), false, `should not label: ${input}`);
+    }
+  });
+});
+
+describe('siteNameOf', () => {
+  it('picks the site out of a hostname', () => {
+    assert.equal(siteNameOf('docs.stripe.com'), 'stripe');
+    assert.equal(siteNameOf('github.com'), 'github');
+    assert.equal(siteNameOf('www.amazon.co.uk'), 'amazon');
+    assert.equal(siteNameOf('localhost'), 'localhost');
+    assert.equal(siteNameOf(''), '');
+  });
+});
+
+describe('omniboxSuggestions', () => {
+  const tabs = [
+    tab(1, 'A', 'https://docs.stripe.com/api'),
+    tab(2, 'B', 'https://dashboard.stripe.com/x'),
+    tab(3, 'C', 'https://github.com/a'),
+  ];
+
+  it('offers a site only when tabs for it are open', () => {
+    const contents = omniboxSuggestions('', tabs).map((s) => s.content);
+    assert.ok(contents.includes('group stripe'));
+    assert.ok(contents.includes('group github'));
+    assert.ok(!contents.includes('group notion'), 'no notion tab is open');
+  });
+
+  it('does not offer the same site twice', () => {
+    // Two stripe tabs on different subdomains are still one site.
+    const stripes = omniboxSuggestions('', tabs).filter((s) => s.content === 'group stripe');
+    assert.equal(stripes.length, 1);
+  });
+
+  it('always offers the commands that need no site', () => {
+    const contents = omniboxSuggestions('', tabs).map((s) => s.content);
+    for (const fixed of ['group by topic', 'ungroup all', 'close duplicates']) {
+      assert.ok(contents.includes(fixed), `missing: ${fixed}`);
+    }
+  });
+
+  it('narrows as the user types', () => {
+    assert.deepEqual(
+      omniboxSuggestions('strip', tabs).map((s) => s.content),
+      ['group stripe'],
+    );
+    assert.deepEqual(
+      omniboxSuggestions('ungroup', tabs).map((s) => s.content),
+      ['ungroup all'],
+    );
+  });
+
+  it('returns nothing rather than everything when nothing matches', () => {
+    assert.deepEqual(omniboxSuggestions('zzzz', tabs), []);
+  });
+
+  it('gives every suggestion a description, which Chrome requires', () => {
+    for (const s of omniboxSuggestions('', tabs)) {
+      assert.ok(s.content && s.description, JSON.stringify(s));
     }
   });
 });
