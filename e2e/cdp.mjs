@@ -17,6 +17,7 @@ export function connect(wsUrl) {
   const ws = new WebSocket(wsUrl);
   const pending = new Map();
   const events = [];
+  const listeners = new Map();
   let nextId = 0;
   const open = new Promise((resolve, reject) => {
     ws.onopen = resolve;
@@ -30,6 +31,7 @@ export function connect(wsUrl) {
       pending.delete(msg.id);
     } else if (msg.method) {
       events.push(msg);
+      for (const fn of listeners.get(msg.method) ?? []) fn(msg.params);
     }
   };
 
@@ -42,7 +44,13 @@ export function connect(wsUrl) {
     });
   };
 
-  return { send, events, close: () => ws.close() };
+  // Called for every event of that method, as it arrives.
+  const on = (method, fn) => {
+    if (!listeners.has(method)) listeners.set(method, []);
+    listeners.get(method).push(fn);
+  };
+
+  return { send, on, events, close: () => ws.close() };
 }
 
 export async function evaluate(cdp, expression) {

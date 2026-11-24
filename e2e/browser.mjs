@@ -36,6 +36,8 @@ function findBinary() {
 }
 
 export function resolveBrowser() {
+  // An explicit binary wins, e.g. a Chromium already installed on a CI box.
+  if (process.env.CHROME_BIN) return process.env.CHROME_BIN;
   const found = findBinary();
   if (found) return found;
 
@@ -62,7 +64,9 @@ export function startFixtureServer(port) {
   });
 }
 
-export async function launch({ binary, extensionDir, profileDir, hosts, port, headless = true }) {
+export async function launch({
+  binary, extensionDir, profileDir, hosts, port, headless = true, extraArgs = [],
+}) {
   const mapping = hosts.map((h) => `MAP ${h} 127.0.0.1:${port}`).join(', ');
   const child = spawn(binary, [
     ...(headless ? ['--headless=new'] : ['--window-position=-3000,-3000', '--window-size=500,400']),
@@ -72,6 +76,9 @@ export async function launch({ binary, extensionDir, profileDir, hosts, port, he
     `--host-resolver-rules=${mapping}`,
     '--no-first-run',
     '--no-default-browser-check',
+    // Running as root (containers, CI) needs this, or Chrome exits at once.
+    ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
+    ...extraArgs,
     'about:blank',
   ], { stdio: 'ignore' });
 

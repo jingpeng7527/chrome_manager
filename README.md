@@ -89,6 +89,8 @@ test/                      # Node test-runner suites, no dependencies
 e2e/                       # Drives the real extension in a real browser
 ├── run.mjs                # The checks
 ├── bench.mjs              # Times commands with a cold service worker
+├── stress.mjs             # Compares two builds under many tabs, big storage, slow Groq
+├── stress-report.mjs      # Renders a stress run as an HTML page of charts
 ├── browser.mjs            # Finds/downloads Chrome for Testing, launches it
 └── cdp.mjs                # Minimal DevTools Protocol client
 ```
@@ -193,6 +195,32 @@ difference under ~50 ms.
 
 The popup also reports its own open time in the header, and its command timing
 in the status line, so the browser you actually use can be read directly.
+
+### Stress testing
+
+`npm run stress` compares two builds as the browser gets heavier, and writes
+an HTML report of charts to `e2e/results/stress-report.html` (raw numbers sit
+beside it as JSON):
+
+```bash
+npm run stress                                   # origin/main vs origin/feat/popup-open-fast
+BEFORE_REF=main AFTER_REF=HEAD npm run stress    # any two git refs
+STRESS_TABS=1,50,200 STRESS_RUNS=6 npm run stress
+CHROME_BIN=/path/to/chromium npm run stress      # use a browser you already have
+```
+
+It varies three things:
+
+| | levels | what it shows |
+|---|---|---|
+| open tabs | 1, 50, 150, 300 | popup open time, data fill time, and model command overhead as tabs grow |
+| storage | small, ~4 MB | whether a heavy `chrome.storage.local` slows the open |
+| Groq latency | 0, 500, 2000, 5000 ms | the model path, with Groq replaced by a stub that answers after a fixed delay |
+
+Both builds are loaded into one browser and their popups opened in turn, so
+they always face the same tabs and the same machine load. Groq is stubbed over
+the DevTools protocol, so no API key is needed and the total minus the stub's
+delay is purely this extension's own time. A full run takes about 6 minutes.
 
 ### Adding a test
 
