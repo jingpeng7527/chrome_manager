@@ -273,6 +273,48 @@ export function groqErrorMessage(payload, status) {
   return failed ? `${base} — model produced: ${String(failed).slice(0, 200)}` : base;
 }
 
+// Labels that are really a suffix rather than the site's name. Used only to
+// pick a human-facing word out of a hostname, so it does not need to be a
+// complete public suffix list.
+const SUFFIXISH = new Set(['com', 'net', 'org', 'edu', 'gov', 'io', 'co', 'uk',
+  'jp', 'cn', 'de', 'fr', 'so', 'dev', 'app', 'ai', 'me', 'us', 'tv']);
+
+// "docs.stripe.com" -> "stripe", "www.amazon.co.uk" -> "amazon"
+export function siteNameOf(hostname) {
+  const parts = String(hostname || '').split('.').filter((p) => p && p !== 'www');
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (!SUFFIXISH.has(parts[i])) return parts[i];
+  }
+  return parts[0] ?? '';
+}
+
+// Suggestions for the address-bar keyword. The site entries are built from the
+// tabs that are actually open, so the list offers "group stripe" only when
+// there are stripe tabs to group.
+export function omniboxSuggestions(text, tabs) {
+  const typed = text.toLowerCase().trim();
+
+  const sites = [...new Set(
+    tabs.map((t) => siteNameOf(hostnameOf(t.url))).filter(Boolean),
+  )].sort();
+
+  const candidates = [
+    ...sites.map((site) => ({
+      content: `group ${site}`,
+      description: `Group the ${site} tabs`,
+    })),
+    { content: 'group by topic', description: 'Sort every tab into topics (uses the model)' },
+    { content: 'ungroup all', description: 'Move every tab out of its group' },
+    { content: 'close duplicates', description: 'Close tabs open at the same URL more than once' },
+  ];
+
+  const matches = typed
+    ? candidates.filter((c) => c.content.includes(typed))
+    : candidates;
+
+  return matches.slice(0, 6);
+}
+
 // Tabs and groups are presented to the model as 1..N, never as Chrome ids.
 export function buildUserMessage(tabs, groups, userPrompt) {
   const groupIndex = new Map(groups.map((g, i) => [g.id, i + 1]));

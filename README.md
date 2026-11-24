@@ -17,6 +17,7 @@ Too many tabs open? Tab Agent lets you group, close, and organize them using nat
 - **Group tabs** by topic, domain, or any criteria
 - **Ungroup, duplicate, or close** tabs in bulk
 - **Instant for common commands** — naming a site or closing duplicates is matched locally, with no API call at all
+- **Runs from the address bar** — `tab group stripe`, with no popup to wait for
 - **Aware of existing groups** — adds to them instead of creating duplicates
 - **No backend required** — calls the Groq API directly from the extension
 - **Free** — Groq's free tier covers ordinary use
@@ -52,7 +53,22 @@ Click the extension icon, click **API Key**, paste your Groq key, and press Ente
 
 ### 4. Start managing tabs
 
-Type a command in the popup and press **Enter** (or click the ↑ button). Use the example chips as a starting point.
+Two ways in.
+
+**From the address bar** — press `Cmd+L`, type `tab`, space, then the command.
+Suggestions are built from the sites you actually have open:
+
+```
+tab group stripe
+tab group by topic
+tab ungroup all
+```
+
+This skips the popup entirely. Opening the popup costs around 300 ms, almost
+all of it Chrome building the window; the address bar costs neither.
+
+**From the popup** — click the toolbar icon, type a command, press **Enter**.
+The example chips are a starting point.
 
 ## How it works
 
