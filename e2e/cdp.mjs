@@ -38,8 +38,13 @@ export function connect(wsUrl) {
   const send = async (method, params = {}) => {
     await open;
     const id = ++nextId;
-    return new Promise((resolve) => {
-      pending.set(id, resolve);
+    return new Promise((resolve, reject) => {
+      // A target that goes away mid-call never answers; fail instead of hanging.
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`${method}: no reply in 30s`));
+      }, 30000);
+      pending.set(id, (msg) => { clearTimeout(timer); resolve(msg); });
       ws.send(JSON.stringify({ id, method, params }));
     });
   };

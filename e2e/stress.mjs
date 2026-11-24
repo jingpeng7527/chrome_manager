@@ -57,11 +57,13 @@ const LATENCIES = list(process.env.STRESS_LATENCIES, [0, 500, 2000, 5000]);
 const SWEEP_LATENCY = 800;  // Groq's usual reply time for this prompt, roughly
 const LATENCY_SWEEP_TABS = 50;
 const FAVICON_KB = 20;
+const ONLY = process.env.STRESS_SCENARIOS?.split(',');
 const SCENARIOS = [
   { scenario: 'small', storage: 'small', busy: false },
   { scenario: 'large', storage: 'large', busy: false },
   { scenario: 'busy', storage: 'small', busy: true },
-];
+].filter((s) => !ONLY || ONLY.includes(s.scenario));
+const DEBUG = process.env.STRESS_DEBUG ? (...a) => console.log('  [debug]', ...a) : () => {};
 
 const BUILDS = [
   { name: 'before', ref: process.env.BEFORE_REF ?? 'origin/main' },
@@ -216,12 +218,14 @@ async function setStorage(build, level) {
 // then to the data being filled in. Same method as bench.mjs, see there for
 // why the popup's timeOrigin can be compared against Date.now().
 async function openOnce(build, worker) {
+  DEBUG('open', build.name);
   const t0 = Date.now();
   const result = await evaluate(worker, `chrome.action.openPopup().then(() => 'ok').catch((e) => e.message)`);
   if (result !== 'ok') return { error: result };
 
   const target = await waitFor(() => findTarget((t) => t.type === 'page' && t.url.includes(`${build.id}/pop_up.html`) && !t.url.includes('?tab')), { every: 10 });
   if (!target) return { error: 'popup target never appeared' };
+  DEBUG('target', target.url);
 
   const popup = connect(target.webSocketDebuggerUrl);
   await popup.send('Runtime.enable');
@@ -235,6 +239,7 @@ async function openOnce(build, worker) {
 
   // How long Chrome takes to answer the popup's tab query, asked now that the
   // popup is idle. Its cost is what the "after" build moved off the open.
+  DEBUG('probe', JSON.stringify(m));
   const query = m ? await evaluate(popup, `(async () => {
     const t = performance.now();
     await chrome.tabs.query({ currentWindow: true });
@@ -265,7 +270,14 @@ async function measureOpens(builds, workers, cell, results) {
     // Alternate which build goes first so neither always pays for warming up.
     const order = i % 2 ? [...builds].reverse() : builds;
     for (const build of order) {
-      const run = await openOnce(build, workers[build.name]);
+      let run;
+      try {
+        run = await openOnce(build, workers[build.name]);
+      } catch (e) {
+        run = { error: e.message };
+        // Leave no popup behind for the next run to collide with.
+        for (const t of await listTargets()) if (t.url.endsWith('/pop_up.html') && t.type === 'page') await closeTarget(t.id);
+      }
       results.push({ kind: 'open', build: build.name, ...cell, run: i, ...run });
       if (run.error) console.log(`    ${build.name} run ${i}: ${run.error}`);
     }

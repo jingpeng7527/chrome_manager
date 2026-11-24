@@ -219,7 +219,7 @@ an HTML report of charts to `e2e/results/stress-report.html` (raw numbers sit
 beside it as JSON):
 
 ```bash
-npm run stress                                   # origin/main vs origin/feat/popup-open-fast
+npm run stress                                   # origin/main vs HEAD
 BEFORE_REF=main AFTER_REF=HEAD npm run stress    # any two git refs
 STRESS_TABS=1,50,200 STRESS_RUNS=6 npm run stress
 CHROME_BIN=/path/to/chromium npm run stress      # use a browser you already have
@@ -231,10 +231,12 @@ It varies three things:
 |---|---|---|
 | open tabs | 1, 50, 150, 300 | popup open time, data fill time, and model command overhead as tabs grow |
 | storage | small, ~4 MB | whether a heavy `chrome.storage.local` slows the open |
+| busy tabs | discarded, or loaded with timers and 20 KB `data:` favicons | whether a working browser slows the open |
 | Groq latency | 0, 500, 2000, 5000 ms | the model path, with Groq replaced by a stub that answers after a fixed delay |
 
 Both builds are loaded into one browser and their popups opened in turn, so
-they always face the same tabs and the same machine load. Groq is stubbed over
+they always face the same tabs and the same machine load. A blank extension
+popup is opened in the same rotation as the floor Chrome itself sets. Groq is stubbed over
 the DevTools protocol, so no API key is needed and the total minus the stub's
 delay is purely this extension's own time. A full run takes about 6 minutes.
 
