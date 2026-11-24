@@ -118,4 +118,21 @@ describe('popup', () => {
     assert.doesNotMatch(html, /<script[^>]*type="module"[^>]*src="pop_up\.js"/,
       'pop_up.html should not load the popup script as a module');
   });
+  it('makes no network connection while opening', () => {
+    // The model request is made by the service worker, not the popup, so the
+    // popup has no reason to reach out to any host as it opens.
+    assert.doesNotMatch(html, /<link[^>]*rel="(preconnect|dns-prefetch|preload)"/);
+    assert.doesNotMatch(html, /(src|href)="https?:/, 'pop_up.html should not load remote resources');
+  });
+
+  it('waits until the popup is shown before asking Chrome for anything', () => {
+    // Chrome shows the popup after its load event; storage reads and the tab
+    // query made before that delay every click.
+    const deferred = script.indexOf('afterShown(() =>');
+    assert.ok(deferred > 0, 'expected startup work to be wrapped in afterShown');
+    const first = (needle) => script.indexOf(needle);
+    for (const call of ['chrome.storage.local.get(', 'refreshTabCount();']) {
+      assert.ok(first(call) > deferred, `${call} runs before the popup is shown`);
+    }
+  });
 });
