@@ -51,6 +51,21 @@ describe('manifest.json', () => {
     }
   });
 
+  it('declares the omnibox keyword its background script listens for', () => {
+    const source = read(manifest.background.service_worker);
+    if (/chrome\.omnibox\.onInput/.test(source)) {
+      assert.ok(manifest.omnibox?.keyword, 'background.js handles omnibox events but no keyword is declared');
+      assert.match(manifest.omnibox.keyword, /^\S+$/, 'a keyword cannot contain whitespace');
+    }
+  });
+
+  it('keeps dynamic import out of the service worker', () => {
+    // import() throws in a ServiceWorkerGlobalScope — the HTML spec forbids it.
+    // The popup may use it; background.js must stay on static imports.
+    assert.doesNotMatch(read(manifest.background.service_worker), /\bimport\s*\(/,
+      'background.js must not use dynamic import()');
+  });
+
   it('requests only the permissions the code relies on', () => {
     for (const permission of ['tabs', 'tabGroups', 'storage']) {
       assert.ok(manifest.permissions.includes(permission), `missing permission: ${permission}`);

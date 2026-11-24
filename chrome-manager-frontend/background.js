@@ -4,6 +4,7 @@ import {
   findLocalCommands,
   groqErrorMessage,
   isGroupingRequest,
+  omniboxSuggestions,
   parseCommands,
   parseLabels,
   resolveIndexes,
@@ -135,61 +136,92 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   (async () => {
-    const requestStart = Date.now();
-    // Small when Chrome had just restarted the worker for this very request.
-    const sinceWorkerStart = requestStart - WORKER_STARTED_AT;
-
-    try {
-      const { prompt } = message;
-      const { tabs: tabData, groups: groupData } = await collectTabState();
-
-      let commands = findLocalCommands(prompt, tabData, groupData);
-      const usedAI = commands === null;
-      let aiRaw = '';
-      let apiMs = 0;
-
-      if (usedAI) {
-        const apiKey = await getApiKey();
-        if (!apiKey) {
-          saveLastStatus('No API key — please set your Groq API key first');
-          sendResponse({ ok: false, error: 'No API key set' });
-          return;
-        }
-        const res = await callGroq(apiKey, tabData, groupData, prompt);
-        commands = res.commands;
-        aiRaw = res.raw;
-        apiMs = res.apiMs;
-      }
-
-      const { succeeded, failed } = await executeCommands(commands);
-      const totalMs = Date.now() - requestStart;
-      // Logged rather than shown: useful when a request feels slow, and it
-      // separates waiting on Groq from everything this extension controls.
-      console.log('timing', JSON.stringify({
-        totalMs, apiMs, workerWaitMs: sinceWorkerStart < 1000 ? sinceWorkerStart : 0,
-      }));
-
-      if (commands.length > 0) {
-        const summary = failed > 0
-          ? `Done: ${succeeded} command(s) succeeded, ${failed} failed`
-          : `Done: executed ${commands.length} command(s)`;
-        saveLastStatus(summary);
-      } else {
-        saveLastStatus(usedAI
-          ? `AI returned no actions. Reply: ${(aiRaw || '(empty)').slice(0, 150)}`
-          : 'Nothing to do');
-      }
-
-      sendResponse({ ok: true, commandCount: succeeded, usedAI, aiRaw, totalMs, apiMs });
-    } catch (error) {
-      const msg = error?.name === 'AbortError'
-        ? 'Groq timeout after 30s'
-        : (error?.message || String(error) || 'Unknown error');
-      console.error('Agent task failed:', error);
-      saveLastStatus(`Failed: ${msg}`);
-      sendResponse({ ok: false, error: msg });
-    }
+    const result = await runCommand(message.prompt);
+    sendResponse(result);
   })();
 
   return true;
 });
+
+// One path for every entry point: the popup, and the address-bar keyword.
+// Returns the same shape the popup already expects.
+async function runCommand(prompt) {
+  const requestStart = Date.now();
+  // Small when Chrome had just restarted the worker for this very request.
+  const sinceWorkerStart = requestStart - WORKER_STARTED_AT;
+
+  try {
+    const { tabs: tabData, groups: groupData } = await collectTabState();
+
+    let commands = findLocalCommands(prompt, tabData, groupData);
+    const usedAI = commands === null;
+    let aiRaw = '';
+    let apiMs = 0;
+
+    if (usedAI) {
+      const apiKey = await getApiKey();
+      if (!apiKey) {
+        saveLastStatus('No API key — please set your Groq API key first');
+        return { ok: false, error: 'No API key set' };
+      }
+      const res = await callGroq(apiKey, tabData, groupData, prompt);
+      commands = res.commands;
+      aiRaw = res.raw;
+      apiMs = res.apiMs;
+    }
+
+    const { succeeded, failed } = await executeCommands(commands);
+    const totalMs = Date.now() - requestStart;
+    // Logged rather than shown: useful when a request feels slow, and it
+    // separates waiting on Groq from everything this extension controls.
+    console.log('timing', JSON.stringify({
+      totalMs, apiMs, workerWaitMs: sinceWorkerStart < 1000 ? sinceWorkerStart : 0,
+    }));
+
+    if (commands.length > 0) {
+      saveLastStatus(failed > 0
+        ? `Done: ${succeeded} command(s) succeeded, ${failed} failed`
+        : `Done: executed ${commands.length} command(s)`);
+    } else {
+      saveLastStatus(usedAI
+        ? `AI returned no actions. Reply: ${(aiRaw || '(empty)').slice(0, 150)}`
+        : 'Nothing to do');
+    }
+
+    return { ok: true, commandCount: succeeded, usedAI, aiRaw, totalMs, apiMs };
+  } catch (error) {
+    const msg = error?.name === 'AbortError'
+      ? 'Groq timeout after 30s'
+      : (error?.message || String(error) || 'Unknown error');
+    console.error('Agent task failed:', error);
+    saveLastStatus(`Failed: ${msg}`);
+    return { ok: false, error: msg };
+  }
+}
+
+// Address-bar keyword. This never builds a popup window, which measurements
+// put at roughly 290 ms — an order of magnitude more than running the command.
+chrome.omnibox.onInputChanged.addListener((text, suggest) => {
+  (async () => {
+    const { tabs } = await collectTabState();
+    suggest(omniboxSuggestions(text, tabs));
+  })();
+});
+
+chrome.omnibox.onInputEntered.addListener((text) => {
+  (async () => {
+    const result = await runCommand(text.trim());
+    // There is no popup to report into, so the toolbar icon carries the result
+    // briefly instead.
+    await showBadge(result.ok
+      ? (result.commandCount > 0 ? String(result.commandCount) : '0')
+      : '!');
+  })();
+});
+
+async function showBadge(text) {
+  await chrome.action.setBadgeText({ text });
+  await chrome.action.setBadgeBackgroundColor({ color: text === '!' ? '#c0392b' : '#4f8ef7' });
+  setTimeout(() => chrome.action.setBadgeText({ text: '' }), 4000);
+}
+

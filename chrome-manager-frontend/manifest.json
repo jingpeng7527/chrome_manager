@@ -18,5 +18,8 @@
   ],
   "host_permissions": [
     "https://api.groq.com/*"
-  ]
+  ],
+  "omnibox": {
+    "keyword": "tab"
+  }
 }
