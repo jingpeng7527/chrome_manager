@@ -10,14 +10,11 @@ function formatTime(timestamp) {
     return new Date(timestamp).toLocaleTimeString();
 }
 
-function loadLastStatus() {
-    chrome.storage.local.get('lastStatus', (data) => {
-        const s = data?.lastStatus;
-        if (!s?.text) { setStatus('Ready'); return; }
-        const suffix = s.updatedAt ? ` (${formatTime(s.updatedAt)})` : '';
-        const state = s.text.startsWith('Done') ? 'ok' : s.text.startsWith('Failed') ? 'error' : '';
-        setStatus(s.text + suffix, state);
-    });
+function showLastStatus(s) {
+    if (!s?.text) { setStatus('Ready'); return; }
+    const suffix = s.updatedAt ? ` (${formatTime(s.updatedAt)})` : '';
+    const state = s.text.startsWith('Done') ? 'ok' : s.text.startsWith('Failed') ? 'error' : '';
+    setStatus(s.text + suffix, state);
 }
 
 // How long this document took to render — NOT how long the popup took to
@@ -40,13 +37,28 @@ function showRenderTime() {
     });
 }
 
-// Load saved key
-chrome.storage.local.get('groqApiKey', (data) => {
-    if (data.groqApiKey) document.getElementById('apiKeyInput').value = data.groqApiKey;
+// Chrome only shows the popup once this page has finished loading, so
+// nothing that talks to the browser runs before that. Storage and the tab
+// query both go through Chrome's main process, the same one that has to build
+// and show the popup window; asking it for every tab in the window first
+// (titles, URLs, favicon data) makes the click wait on work the user cannot
+// see yet. Everything below only fills in details, so it waits for the load
+// event and then one more task, letting Chrome put the popup on screen first.
+function afterShown(fn) {
+    const run = () => setTimeout(fn, 0);
+    if (document.readyState === 'complete') run();
+    else window.addEventListener('load', run, { once: true });
+}
+
+afterShown(() => {
+    // One storage round trip for both values rather than two.
+    chrome.storage.local.get(['groqApiKey', 'lastStatus'], (data) => {
+        if (data?.groqApiKey) document.getElementById('apiKeyInput').value = data.groqApiKey;
+        showLastStatus(data?.lastStatus);
+    });
+    refreshTabCount();
 });
 
-loadLastStatus();
-refreshTabCount();
 showRenderTime();
 
 // Example chips
