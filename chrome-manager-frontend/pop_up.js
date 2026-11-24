@@ -50,14 +50,32 @@ function afterShown(fn) {
     else window.addEventListener('load', run, { once: true });
 }
 
+// The tab count waits longer still, for the popup's first paint. With the
+// "tabs" permission chrome.tabs.query returns every tab's favicon, and pages
+// that set a data: URL favicon put the whole image in it: 300 such tabs came
+// to 8 MB. Copying that out of Chrome's main process while the popup is still
+// being put on screen added ~70 ms to the open (npm run stress, busy tabs).
+// After the first paint it delays only the count.
+function afterPainted(fn) {
+    let done = false;
+    const run = () => { if (!done) { done = true; setTimeout(fn, 0); } };
+    if (performance.getEntriesByName('first-contentful-paint').length) { run(); return; }
+    new PerformanceObserver((list) => {
+        if (list.getEntriesByName('first-contentful-paint').length) run();
+    }).observe({ type: 'paint', buffered: true });
+    // Never leave the count blank if a paint entry does not arrive.
+    afterShown(() => setTimeout(run, 500));
+}
+
 afterShown(() => {
     // One storage round trip for both values rather than two.
     chrome.storage.local.get(['groqApiKey', 'lastStatus'], (data) => {
         if (data?.groqApiKey) document.getElementById('apiKeyInput').value = data.groqApiKey;
         showLastStatus(data?.lastStatus);
     });
-    refreshTabCount();
 });
+
+afterPainted(refreshTabCount);
 
 showRenderTime();
 

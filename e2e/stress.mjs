@@ -1,7 +1,7 @@
 // Stress test: how opening the popup and running a model command hold up as
 // the browser gets heavier, for two builds side by side.
 //
-//   npm run stress                                   # main vs feat/popup-open-fast
+//   npm run stress                                   # origin/main vs HEAD
 //   BEFORE_REF=main AFTER_REF=HEAD npm run stress    # any two git refs
 //   STRESS_TABS=1,50,200 STRESS_RUNS=6 npm run stress
 //
@@ -18,9 +18,16 @@
 //            hundreds fit in memory, which is also how Chrome keeps old tabs)
 //   storage  "small" is a key and a status line; "large" adds ~4 MB of other
 //            keys, the size an extension accumulates over months
+//   busy     tabs stay loaded, each page runs a small timer and carries a
+//            ~20 KB data: URL favicon, which chrome.tabs.query hands back in
+//            full for every tab. A worst case, but web apps do this.
 //   latency  Groq is replaced by a stub answering after a fixed delay, so the
 //            model path measures this extension's own overhead around the
 //            request, not Groq's mood that minute. No API key is needed.
+//
+// A third, blank extension whose popup is a single line of text is opened in
+// the same rotation: it is what Chrome alone costs, the floor neither build
+// can go under.
 //
 // Each build gets a probe script (stress-probe.js) inserted ahead of pop_up.js
 // in its copy of pop_up.html. It only records when the tab count and the
@@ -32,7 +39,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { extensionId, launch, resolveBrowser, startFixtureServer } from './browser.mjs';
+import { createServer } from 'node:http';
+
+import { extensionId, launch, resolveBrowser } from './browser.mjs';
 import { closeTarget, connect, evaluate, listTargets, openTarget } from './cdp.mjs';
 import { renderReport } from './stress-report.mjs';
 
@@ -47,11 +56,16 @@ const COMMAND_RUNS = Number(process.env.STRESS_COMMAND_RUNS ?? 3);
 const LATENCIES = list(process.env.STRESS_LATENCIES, [0, 500, 2000, 5000]);
 const SWEEP_LATENCY = 800;  // Groq's usual reply time for this prompt, roughly
 const LATENCY_SWEEP_TABS = 50;
-const STORAGE_LEVELS = ['small', 'large'];
+const FAVICON_KB = 20;
+const SCENARIOS = [
+  { scenario: 'small', storage: 'small', busy: false },
+  { scenario: 'large', storage: 'large', busy: false },
+  { scenario: 'busy', storage: 'small', busy: true },
+];
 
 const BUILDS = [
   { name: 'before', ref: process.env.BEFORE_REF ?? 'origin/main' },
-  { name: 'after', ref: process.env.AFTER_REF ?? 'origin/feat/popup-open-fast' },
+  { name: 'after', ref: process.env.AFTER_REF ?? 'HEAD' },
 ];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -84,6 +98,39 @@ function prepareBuild(build, workDir) {
   if (!page.includes('<script src="pop_up.js">')) throw new Error(`${build.ref}: pop_up.html has no pop_up.js script tag`);
   writeFileSync(html, page.replace('<script src="pop_up.js">', '<script src="stress-probe.js"></script>\n    <script src="pop_up.js">'));
   return { ...build, sha, subject: git('log', '-1', '--format=%s', sha), dir: ext, id: extensionId(ext) };
+}
+
+function prepareBlank(workDir) {
+  const ext = join(workDir, 'blank');
+  mkdirSync(ext, { recursive: true });
+  writeFileSync(join(ext, 'manifest.json'), JSON.stringify({
+    manifest_version: 3, name: 'Blank popup', version: '1',
+    action: { default_popup: 'pop_up.html' }, background: { service_worker: 'bg.js' },
+  }));
+  writeFileSync(join(ext, 'bg.js'), '');
+  writeFileSync(join(ext, 'stress-probe.js'), PROBE);
+  writeFileSync(join(ext, 'fill.js'), `document.getElementById('tabCount').textContent = '0 tabs';
+document.getElementById('statusText').textContent = 'blank';`);
+  writeFileSync(join(ext, 'pop_up.html'), `<!doctype html><html><head><meta charset="utf-8"><script src="stress-probe.js"></script></head>
+<body><span id="tabCount"></span> <span id="statusText"></span><script src="fill.js"></script></body></html>`);
+  return { name: 'blank', ref: '(blank popup)', sha: '-', subject: 'Chrome alone: a popup with one line of text', dir: ext, id: extensionId(ext), blank: true };
+}
+
+// Pages for the tabs. Real hostnames per site so the extension's matching
+// sees variety; long titles like real pages. Busy pages also run a timer and
+// declare an inline favicon.
+function startPages(port) {
+  const icon = 'data:image/svg+xml;base64,' + Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg"><!--${'x'.repeat(FAVICON_KB * 750)}--></svg>`).toString('base64');
+  const server = createServer((req, res) => {
+    const busy = req.url.includes('busy');
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(`<!doctype html><title>${req.headers.host} | A realistic page title of some length ${req.url}</title>`
+      + (busy ? `<link rel="icon" href="${icon}">` : '')
+      + '<body><p id="d">fixture</p>'
+      + (busy ? `<script>setInterval(() => { const t = performance.now(); while (performance.now() - t < 1); d.textContent = t; }, 200);</script>` : ''));
+  });
+  return new Promise((r) => server.listen(port, '127.0.0.1', () => r({ close: () => server.close() })));
 }
 
 // --- browser helpers --------------------------------------------------------
@@ -122,7 +169,7 @@ async function withPage(build, fn) {
   }
 }
 
-async function setTabCount(build, n) {
+async function setTabCount(build, n, busy = false) {
   return withPage(build, (page) => evaluate(page, `(async () => {
     const [win] = await chrome.windows.getAll({ windowTypes: ['normal'] });
     const tabs = await chrome.tabs.query({ windowId: win.id });
@@ -132,7 +179,7 @@ async function setTabCount(build, n) {
     const created = [];
     for (let i = have; i < ${n}; i++) {
       const site = 'site' + (i % 24) + '.test';
-      created.push(await chrome.tabs.create({ windowId: win.id, url: 'http://' + site + '/page-' + i, active: false }));
+      created.push(await chrome.tabs.create({ windowId: win.id, url: 'http://' + site + '/page-' + i + (${busy} ? '-busy' : ''), active: false }));
     }
     // Let them load so they carry real titles, then discard them.
     const deadline = Date.now() + 60000;
@@ -141,7 +188,7 @@ async function setTabCount(build, n) {
       if (now.every((t) => t.status === 'complete' || t.discarded)) break;
       await new Promise((r) => setTimeout(r, 200));
     }
-    for (const t of created) await chrome.tabs.discard(t.id).catch(() => {});
+    if (!${busy}) for (const t of created) await chrome.tabs.discard(t.id).catch(() => {});
     // Not counting this setup page itself, which closes right after.
     return (await chrome.tabs.query({ windowId: win.id })).filter((t) => !t.url.startsWith('chrome-extension:')).length;
   })()`));
@@ -316,25 +363,27 @@ try {
   builds = BUILDS.map((b) => prepareBuild(b, workDir));
   for (const b of builds) console.log(`${b.name.padEnd(6)} ${b.ref} @ ${b.sha}  ${b.subject}`);
 
-  fixtures = await startFixtureServer(PORT);
+  builds.push(prepareBlank(workDir));
+  const real = builds.filter((b) => !b.blank);
+  fixtures = await startPages(PORT);
   const binary = resolveBrowser();
 
   // Popup opens: every tab count, at both storage sizes. A fresh browser per
   // storage size, tabs added as the sweep goes up.
-  for (const storage of STORAGE_LEVELS) {
+  for (const { scenario, storage, busy } of SCENARIOS) {
     const profileDir = mkdtempSync(join(workDir, 'profile-'));
     browser = await launch({
       binary, extensionDir: builds.map((b) => b.dir).join(','), profileDir, hosts: ['*.test'], port: PORT,
     });
     const workers = {};
     for (const b of builds) workers[b.name] = await workerOf(b);
-    for (const b of builds) await setStorage(b, storage);
+    for (const b of real) await setStorage(b, storage);
 
     for (const tabs of TAB_LEVELS) {
-      const actual = await setTabCount(builds[0], tabs);
-      console.log(`\npopup open  storage=${storage}  tabs=${actual}`);
-      await sleep(1000);
-      const cell = { storage, tabs };
+      const actual = await setTabCount(builds[0], tabs, busy);
+      console.log(`\npopup open  ${scenario}  tabs=${actual}`);
+      await sleep(busy ? 3000 : 1000);
+      const cell = { scenario, tabs };
       await measureOpens(builds, workers, cell, results);
       summarize(results.filter((r) => r.kind === 'open'), builds, cell, ['visible', 'ready', 'query']);
     }
@@ -350,11 +399,11 @@ try {
   {
     const profileDir = mkdtempSync(join(workDir, 'profile-'));
     browser = await launch({
-      binary, extensionDir: builds.map((b) => b.dir).join(','), profileDir, hosts: ['*.test'], port: PORT,
+      binary, extensionDir: real.map((b) => b.dir).join(','), profileDir, hosts: ['*.test'], port: PORT,
     });
     const stubState = { latency: 0 };
     const workers = [];
-    for (const b of builds) {
+    for (const b of real) {
       const w = await workerOf(b);
       await stubGroq(w, stubState);
       workers.push(w);
@@ -365,16 +414,16 @@ try {
       const actual = await setTabCount(builds[0], tabs);
       console.log(`\nmodel command  tabs=${actual}  stub latency=${SWEEP_LATENCY} ms`);
       const cell = { sweep: 'tabs', tabs, latency: SWEEP_LATENCY };
-      await measureCommands(builds, stubState, cell, results);
-      summarize(results.filter((r) => r.kind === 'command'), builds, cell, ['total', 'overhead']);
+      await measureCommands(real, stubState, cell, results);
+      summarize(results.filter((r) => r.kind === 'command'), real, cell, ['total', 'overhead']);
     }
 
     await setTabCount(builds[0], LATENCY_SWEEP_TABS);
     for (const latency of LATENCIES) {
       console.log(`\nmodel command  tabs=${LATENCY_SWEEP_TABS}  stub latency=${latency} ms`);
       const cell = { sweep: 'latency', tabs: LATENCY_SWEEP_TABS, latency };
-      await measureCommands(builds, stubState, cell, results);
-      summarize(results.filter((r) => r.kind === 'command'), builds, cell, ['total', 'overhead']);
+      await measureCommands(real, stubState, cell, results);
+      summarize(results.filter((r) => r.kind === 'command'), real, cell, ['total', 'overhead']);
     }
 
     workers.forEach((w) => w.close());
@@ -390,7 +439,7 @@ const run = {
   finishedAt: new Date().toISOString(),
   machine: { platform: process.platform, arch: process.arch, cpus: (await import('node:os')).cpus().length },
   browser: resolveBrowser(),
-  config: { TAB_LEVELS, OPEN_RUNS, COMMAND_RUNS, LATENCIES, SWEEP_LATENCY, LATENCY_SWEEP_TABS, STORAGE_LEVELS },
+  config: { TAB_LEVELS, OPEN_RUNS, COMMAND_RUNS, LATENCIES, SWEEP_LATENCY, LATENCY_SWEEP_TABS, SCENARIOS, FAVICON_KB },
   builds: builds.map(({ name, ref, sha, subject }) => ({ name, ref, sha, subject })),
   results,
 };

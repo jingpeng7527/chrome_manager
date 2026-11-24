@@ -6,8 +6,9 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const COLORS = { before: 'var(--series-1)', after: 'var(--series-2)' };
-const LABELS = { before: '优化前', after: '优化后' };
+const COLORS = { before: 'var(--series-1)', after: 'var(--series-2)', blank: 'var(--text-muted)' };
+const LABELS = { before: '改动前', after: '改动后', blank: '空白弹窗' };
+const SCENARIO_LABELS = { small: '存储小', large: '存储大（约 4 MB）', busy: '忙碌：标签页都在运行' };
 
 const median = (xs) => {
   const s = xs.filter((x) => x != null).sort((a, b) => a - b);
@@ -55,7 +56,7 @@ function lineChart({ xs, xLabel, series, yMax, reference }) {
     // Individual runs, faint, so the spread is visible behind the median.
     s.points.forEach((p) => {
       const i = xs.indexOf(p.x);
-      const off = s.key === 'before' ? -5 : 5;
+      const off = { before: -5, after: 5 }[s.key] ?? 0;
       for (const r of p.runs ?? []) {
         svg += `<circle cx="${xAt(i) + off}" cy="${yAt(Math.min(r, top))}" r="2" fill="${COLORS[s.key]}" opacity="0.28"/>`;
       }
@@ -86,15 +87,18 @@ function panel(title, note, spec) {
 }
 
 export function renderReport(run) {
-  const builds = run.builds.map((b) => b.name);
+  const all = run.builds.map((b) => b.name);
+  const builds = all.filter((b) => b !== 'blank');
+  const scenarioOf = (r) => r.scenario ?? r.storage;
+  const scenarios = (run.config.SCENARIOS ?? run.config.STORAGE_LEVELS.map((x) => ({ scenario: x }))).map((x) => x.scenario);
   const opens = run.results.filter((r) => r.kind === 'open' && !r.error);
   const commands = run.results.filter((r) => r.kind === 'command');
   const tabsXs = run.config.TAB_LEVELS;
 
-  const openSeries = (storage, field) => builds.map((key) => ({
+  const openSeries = (scenario, field, withBlank = false) => (withBlank ? all : builds).map((key) => ({
     key,
     points: tabsXs.map((x) => {
-      const runs = opens.filter((r) => r.build === key && r.storage === storage && r.tabs === x).map((r) => r[field]);
+      const runs = opens.filter((r) => r.build === key && scenarioOf(r) === scenario && r.tabs === x).map((r) => r[field]);
       return { x, y: median(runs), runs };
     }),
   }));
@@ -110,11 +114,12 @@ export function renderReport(run) {
   const scaleFor = (field) => niceMax(Math.max(...opens.map((r) => r[field])) * 1.02);
 
   const maxTabs = tabsXs[tabsXs.length - 1];
-  const tile = (label, field, storage) => {
-    const vals = builds.map((b) => median(opens.filter((r) => r.build === b && r.storage === storage && r.tabs === maxTabs).map((r) => r[field])));
+  const tile = (label, field, scenario) => {
+    const keys = field === 'visible' ? all : builds;
+    const vals = keys.map((b) => median(opens.filter((r) => r.build === b && scenarioOf(r) === scenario && r.tabs === maxTabs).map((r) => r[field])));
     const delta = vals[1] - vals[0];
     return `<div class="tile"><div class="tile-label">${esc(label)}</div>
-      <div class="tile-values">${builds.map((b, i) => `<span><i style="background:${COLORS[b]}"></i>${LABELS[b]} <b>${vals[i]} ms</b></span>`).join('')}</div>
+      <div class="tile-values">${keys.map((b, i) => `<span><i style="background:${COLORS[b]}"></i>${LABELS[b]} <b>${vals[i]} ms</b></span>`).join('')}</div>
       <div class="tile-delta">${delta === 0 ? '没有差别' : delta < 0 ? `快了 ${-delta} ms` : `慢了 ${delta} ms`}</div></div>`;
   };
 
@@ -178,31 +183,27 @@ ${legend}
 
 <h2>${maxTabs} 个标签页时，点击图标到弹窗出现</h2>
 <div class="tiles">
+${scenarios.includes('busy') ? tile('忙碌浏览器，点击到看见弹窗', 'visible', 'busy') : ''}
 ${tile('存储小，点击到看见弹窗', 'visible', 'small')}
-${tile('存储大（约 4 MB），点击到看见弹窗', 'visible', 'large')}
-${tile('存储大，点击到数据填好', 'ready', 'large')}
 ${cmdTile}
 </div>
 
 <h2>打开弹窗：点击到看见</h2>
 <p>从 chrome.action.openPopup() 到弹窗第一次绘制。这是用户真正等的那段时间，包含 Chrome 自己创建弹窗窗口的时间。</p>
 <div class="grid2">
-${panel('存储小', null, { xs: tabsXs, xLabel: '标签页数', series: openSeries('small', 'visible'), yMax: scaleFor('visible') })}
-${panel('存储大（约 4 MB）', null, { xs: tabsXs, xLabel: '标签页数', series: openSeries('large', 'visible'), yMax: scaleFor('visible') })}
+${scenarios.map((sc) => panel(SCENARIO_LABELS[sc] ?? sc, null, { xs: tabsXs, xLabel: '标签页数', series: openSeries(sc, 'visible', true), yMax: scaleFor('visible') })).join('')}
 </div>
 
 <h2>打开弹窗：点击到数据填好</h2>
-<p>到标签页数量和上次状态都显示出来为止。优化后的版本故意先显示、后填数据，所以这一段可能比看见弹窗晚一点。</p>
+<p>到标签页数量和上次状态都显示出来为止。弹窗故意先显示、后填数据，所以这一段可能比看见弹窗晚一点。</p>
 <div class="grid2">
-${panel('存储小', null, { xs: tabsXs, xLabel: '标签页数', series: openSeries('small', 'ready'), yMax: scaleFor('ready') })}
-${panel('存储大（约 4 MB）', null, { xs: tabsXs, xLabel: '标签页数', series: openSeries('large', 'ready'), yMax: scaleFor('ready') })}
+${scenarios.map((sc) => panel(SCENARIO_LABELS[sc] ?? sc, null, { xs: tabsXs, xLabel: '标签页数', series: openSeries(sc, 'ready'), yMax: scaleFor('ready') })).join('')}
 </div>
 
 <h2>Chrome 回答一次 tabs.query 要多久</h2>
-<p>弹窗打开后单独测的。标签页越多，这次查询越贵；优化后的版本把它挪到了弹窗显示之后。</p>
+<p>弹窗打开后单独测的。标签页越多，这次查询越贵；忙碌场景里每个标签页都带着整张图标，所以贵得多。</p>
 <div class="grid2">
-${panel('存储小', null, { xs: tabsXs, xLabel: '标签页数', series: openSeries('small', 'query'), yMax: scaleFor('query') })}
-${panel('存储大（约 4 MB）', null, { xs: tabsXs, xLabel: '标签页数', series: openSeries('large', 'query'), yMax: scaleFor('query') })}
+${scenarios.map((sc) => panel(SCENARIO_LABELS[sc] ?? sc, null, { xs: tabsXs, xLabel: '标签页数', series: openSeries(sc, 'query'), yMax: scaleFor('query') })).join('')}
 </div>
 
 <h2>模型命令（"group by topic"），Groq 用本地桩代替</h2>
@@ -217,6 +218,8 @@ ${panel(`总时间 vs 网络延迟（${run.config.LATENCY_SWEEP_TABS} 个标签�
 <li>两个版本装进<b>同一个</b>浏览器，轮流打开各自的弹窗，所以它们面对的标签页、机器负载和时间点都一样。</li>
 <li>标签页先加载出真实标题，再全部丢弃（discard），这样几百个也放得下，也和 Chrome 处理旧标签页的方式一致。</li>
 <li>"存储大"是额外 400 个 10 KB 的键，模拟用了几个月后的 chrome.storage.local。</li>
+<li>"忙碌"场景里标签页不丢弃，每个页面都在跑一个小定时器，并且用一个约 ${run.config.FAVICON_KB ?? 20} KB 的 data: 图标。chrome.tabs.query 会把每个标签页的图标原样带回来，这是最坏情况，但确实有网页这样做。</li>
+<li>灰线是一个空白扩展的弹窗（只有一行字），代表 Chrome 自己的开销，两个版本都不可能比它更快。</li>
 <li>每个版本的 pop_up.html 前面插了同一个探针脚本，只记录标签页数量和状态栏什么时候被填上。</li>
 <li>浅色点是每一次的单独结果，实心点和线是中位数。弹窗打开的时间本身就很抖，看趋势和两条线的相对位置，别太看单个数字。</li>
 <li>无效的测量（弹窗被复用等）：${errors.length} 次，已剔除。</li>

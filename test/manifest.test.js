@@ -150,4 +150,13 @@ describe('popup', () => {
       assert.ok(first(call) > deferred, `${call} runs before the popup is shown`);
     }
   });
+
+  it('counts tabs only after the first paint', () => {
+    // chrome.tabs.query returns every tab's favicon, data: URLs included; with
+    // hundreds of tabs that is megabytes Chrome copies while the popup is
+    // still going on screen.
+    assert.match(script, /afterPainted\(refreshTabCount\)/);
+    const startup = script.slice(script.indexOf('afterShown(() =>'), script.indexOf('afterPainted(refreshTabCount)'));
+    assert.doesNotMatch(startup, /refreshTabCount\(\)/, 'the startup block should not count tabs itself');
+  });
 });
