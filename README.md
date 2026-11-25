@@ -45,7 +45,7 @@ Moving from a popup to a side panel made opening Tab Agent **3 to 4 times faster
   <img src="docs/images/open-time.svg" alt="Open time: popup vs side panel" width="720">
 </p>
 
-<sub>Measured with <code>npm run stress</code> on a MacBook, median of 10 opens per setting.</sub>
+<sub>Measured with <code>npm run stress</code> on a MacBook.</sub>
 
 ## ⚙️ How it works
 
