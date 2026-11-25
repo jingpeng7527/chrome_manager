@@ -1,24 +1,28 @@
-# Tab Agent
+# 🗂️ Tab Agent
 
 Organize your Chrome tabs by just saying what you want.
 
 Type something like "group my GitHub tabs" or "close duplicates", and Tab Agent does it for you. Simple commands run instantly on your machine. Smarter ones, like grouping by topic, use Groq's free AI API.
 
-## What it can do
+<p align="center">
+  <img src="docs/images/side-panel.png" alt="Tab Agent side panel" width="380">
+</p>
 
-- Group tabs by site or by topic
-- Close duplicate tabs
-- Ungroup or close tabs in bulk
-- Add tabs to groups you already have
+## ✨ What it can do
 
-## Install
+- 📁 Group tabs by site or by topic
+- 🧹 Close duplicate tabs
+- 📤 Ungroup or close tabs in bulk
+- ➕ Add tabs to groups you already have
+
+## 🚀 Install
 
 1. Get a free API key at [console.groq.com](https://console.groq.com)
 2. Open `chrome://extensions` and turn on **Developer mode**
 3. Click **Load unpacked** and choose the `chrome-manager-frontend` folder
 4. Click the extension icon, then **API Key**, and paste your key
 
-## Use it
+## 💬 Use it
 
 Click the extension icon to open the side panel, type a command, and press Enter.
 
@@ -33,7 +37,7 @@ close duplicates
 ungroup all
 ```
 
-## How it works
+## ⚙️ How it works
 
 ```
   You type a command
@@ -54,10 +58,10 @@ ungroup all
 - **Groq**: only gives each tab a topic label. The extension itself decides the groups, so a wrong label can only misplace one tab.
 - **Core logic** (`lib.js`): the matching and grouping rules, kept free of Chrome APIs so they are easy to test.
 
-## For developers
+## 🛠️ For developers
 
 See [docs/DESIGN.md](docs/DESIGN.md) for more detail.
 
-## License
+## 📄 License
 
 MIT
