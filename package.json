@@ -9,6 +9,7 @@
     "check": "for f in chrome-manager-frontend/*.js; do node --check \"$f\" || exit 1; done",
     "e2e": "node e2e/run.mjs",
     "bench": "node e2e/bench.mjs",
-    "stress": "node e2e/stress.mjs"
+    "stress": "node e2e/stress.mjs",
+    "group-time": "node e2e/group-time.mjs"
   }
 }
