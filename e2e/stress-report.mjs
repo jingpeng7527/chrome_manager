@@ -181,20 +181,20 @@ ul { color: var(--text-secondary); padding-left: 20px; }
 <p class="meta">${esc(run.startedAt.slice(0, 16).replace('T', ' '))} UTC · ${esc(run.machine.platform)} ${esc(run.machine.arch)}，${run.machine.cpus} 核 · 每格每个版本打开 ${run.config.OPEN_RUNS} 次，取中位数</p>
 ${legend}
 
-<h2>${maxTabs} 个标签页时，点击图标到弹窗出现</h2>
+<h2>${maxTabs} 个标签页时，点击图标到界面出现</h2>
 <div class="tiles">
-${scenarios.includes('busy') ? tile('忙碌浏览器，点击到看见弹窗', 'visible', 'busy') : ''}
-${tile('存储小，点击到看见弹窗', 'visible', 'small')}
+${scenarios.includes('busy') ? tile('忙碌浏览器，点击到看见界面', 'visible', 'busy') : ''}
+${tile('存储小，点击到看见界面', 'visible', 'small')}
 ${cmdTile}
 </div>
 
-<h2>打开弹窗：点击到看见</h2>
-<p>从 chrome.action.openPopup() 到弹窗第一次绘制。这是用户真正等的那段时间，包含 Chrome 自己创建弹窗窗口的时间。</p>
+<h2>点击图标：到看见界面</h2>
+<p>从点击工具栏图标到界面第一次绘制。这是用户真正等的那段时间，包含 Chrome 自己创建弹窗窗口或侧边栏的时间。</p>
 <div class="grid2">
 ${scenarios.map((sc) => panel(SCENARIO_LABELS[sc] ?? sc, null, { xs: tabsXs, xLabel: '标签页数', series: openSeries(sc, 'visible', true), yMax: scaleFor('visible') })).join('')}
 </div>
 
-<h2>打开弹窗：点击到数据填好</h2>
+<h2>点击图标：到数据填好</h2>
 <p>到标签页数量和上次状态都显示出来为止。弹窗故意先显示、后填数据，所以这一段可能比看见弹窗晚一点。</p>
 <div class="grid2">
 ${scenarios.map((sc) => panel(SCENARIO_LABELS[sc] ?? sc, null, { xs: tabsXs, xLabel: '标签页数', series: openSeries(sc, 'ready'), yMax: scaleFor('ready') })).join('')}
@@ -219,7 +219,7 @@ ${panel(`总时间 vs 网络延迟（${run.config.LATENCY_SWEEP_TABS} 个标签�
 <li>标签页先加载出真实标题，再全部丢弃（discard），这样几百个也放得下，也和 Chrome 处理旧标签页的方式一致。</li>
 <li>"存储大"是额外 400 个 10 KB 的键，模拟用了几个月后的 chrome.storage.local。</li>
 <li>"忙碌"场景里标签页不丢弃，每个页面都在跑一个小定时器，并且用一个约 ${run.config.FAVICON_KB ?? 20} KB 的 data: 图标。chrome.tabs.query 会把每个标签页的图标原样带回来，这是最坏情况，但确实有网页这样做。</li>
-<li>灰线是一个空白扩展的弹窗（只有一行字），代表 Chrome 自己的开销，两个版本都不可能比它更快。</li>
+<li>灰线是一个空白扩展的弹窗（只有一行字），代表 Chrome 建一个弹窗本身要花的时间。任何弹窗都不可能比它快，只有不用弹窗（比如侧边栏）才能低于它。</li>
 <li>每个版本的 pop_up.html 前面插了同一个探针脚本，只记录标签页数量和状态栏什么时候被填上。</li>
 <li>浅色点是每一次的单独结果，实心点和线是中位数。弹窗打开的时间本身就很抖，看趋势和两条线的相对位置，别太看单个数字。</li>
 <li>无效的测量（弹窗被复用等）：${errors.length} 次，已剔除。</li>

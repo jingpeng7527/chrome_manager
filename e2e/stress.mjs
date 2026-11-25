@@ -34,7 +34,7 @@
 // status line get filled in; both builds get the identical probe.
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -163,7 +163,10 @@ async function withPage(build, fn) {
   const target = await openTarget(`chrome-extension://${build.id}/pop_up.html`);
   const page = connect(target.webSocketDebuggerUrl);
   await page.send('Runtime.enable');
-  await waitFor(() => evaluate(page, 'document.readyState === "complete"').catch(() => false));
+  // A new target briefly shows about:blank before navigating; wait for the page itself.
+  const ready = await waitFor(() => evaluate(page,
+    `location.protocol === 'chrome-extension:' && document.readyState === 'complete'`).catch(() => false));
+  if (!ready) throw new Error(`${build.name}: ${target.url} never finished loading`);
   try {
     return await fn(page);
   } finally {
@@ -389,7 +392,9 @@ function summarize(results, builds, cell, fields) {
   }
 }
 
-const workDir = mkdtempSync(join(tmpdir(), 'chrome-manager-stress-'));
+// Chrome derives an unpacked extension's id from its resolved path, and on
+// macOS the temp dir is a symlink (/var -> /private/var).
+const workDir = realpathSync(mkdtempSync(join(tmpdir(), 'chrome-manager-stress-')));
 const results = [];
 let fixtures;
 let browser;
@@ -414,7 +419,12 @@ try {
       headless: !HEADED, extraArgs: ['--enable-unsafe-extension-debugging'],
     });
     const workers = {};
-    await sleep(1500);
+    // Every extension has to be loaded before anything talks to it.
+    const loaded = await waitFor(async () => {
+      const targets = await listTargets();
+      return builds.every((b) => targets.some((t) => t.type === 'service_worker' && t.url.includes(b.id)));
+    }, { tries: 120, every: 250 });
+    if (!loaded) throw new Error('not every extension loaded within 30s');
     const clicks = await setUpClicks().catch(() => false);
     console.log(clicks ? 'opening popups with a simulated toolbar click' : 'opening popups with chrome.action.openPopup()');
     if (!clicks) for (const b of builds) workers[b.name] = await workerOf(b);

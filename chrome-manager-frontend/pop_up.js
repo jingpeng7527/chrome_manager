@@ -75,7 +75,10 @@ afterShown(() => {
     });
 });
 
-afterPainted(refreshTabCount);
+afterPainted(() => {
+    refreshTabCount();
+    trackTabCount();
+});
 
 showRenderTime();
 
@@ -124,10 +127,37 @@ document.getElementById('apiKeyInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') document.getElementById('saveKeyBtn').click();
 });
 
+let tabCount = null;
+let windowId = null;
+
+function showTabCount() {
+    document.getElementById('tabCount').textContent = `${tabCount ?? 0} tabs`;
+}
+
 function refreshTabCount() {
     chrome.tabs.query({ currentWindow: true }, (tabs) => {
-        document.getElementById('tabCount').textContent = `${tabs?.length ?? 0} tabs`;
+        tabCount = tabs?.length ?? 0;
+        windowId = tabs?.[0]?.windowId ?? windowId;
+        showTabCount();
     });
+}
+
+// The side panel stays open while tabs come and go. Keep the count current
+// from tab events instead of querying again: a query returns every tab with
+// its favicon, megabytes with hundreds of tabs, and opening a batch of tabs
+// would repeat it for each one.
+function trackTabCount() {
+    const adjust = (inWindow, delta) => {
+        if (tabCount == null || windowId == null || inWindow !== windowId) return;
+        tabCount = Math.max(0, tabCount + delta);
+        showTabCount();
+    };
+    chrome.tabs.onCreated.addListener((tab) => adjust(tab.windowId, +1));
+    chrome.tabs.onRemoved.addListener((_id, info) => {
+        if (!info.isWindowClosing) adjust(info.windowId, -1);
+    });
+    chrome.tabs.onAttached.addListener((_id, info) => adjust(info.newWindowId, +1));
+    chrome.tabs.onDetached.addListener((_id, info) => adjust(info.oldWindowId, -1));
 }
 
 // Commands that need no model run here rather than in the service worker.
