@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const COLORS = { before: 'var(--series-1)', after: 'var(--series-2)', blank: 'var(--text-muted)' };
-const LABELS = { before: '改动前', after: '改动后', blank: '空白弹窗' };
+const LABELS = { before: '改动前（弹窗）', after: '改动后（侧边栏）', blank: '空白弹窗' };
 const SCENARIO_LABELS = { small: '存储小', large: '存储大（约 4 MB）', busy: '忙碌：标签页都在运行' };
 
 const median = (xs) => {
