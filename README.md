@@ -39,7 +39,7 @@ ungroup all
 
 ## ⚡ Performance
 
-Moving from a popup to a side panel made opening Tab Agent **3 to 4 times faster**, and it now opens faster than even a blank Chrome popup can.
+Moving from a popup to a side panel made opening Tab Agent **3 to 4 times faster**.
 
 <p align="center">
   <img src="docs/images/open-time.svg" alt="Open time: popup vs side panel" width="720">
