@@ -17,6 +17,7 @@ export function connect(wsUrl) {
   const ws = new WebSocket(wsUrl);
   const pending = new Map();
   const events = [];
+  const listeners = new Map();
   let nextId = 0;
   const open = new Promise((resolve, reject) => {
     ws.onopen = resolve;
@@ -30,19 +31,31 @@ export function connect(wsUrl) {
       pending.delete(msg.id);
     } else if (msg.method) {
       events.push(msg);
+      for (const fn of listeners.get(msg.method) ?? []) fn(msg.params);
     }
   };
 
   const send = async (method, params = {}) => {
     await open;
     const id = ++nextId;
-    return new Promise((resolve) => {
-      pending.set(id, resolve);
+    return new Promise((resolve, reject) => {
+      // A target that goes away mid-call never answers; fail instead of hanging.
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`${method}: no reply in 30s`));
+      }, 30000);
+      pending.set(id, (msg) => { clearTimeout(timer); resolve(msg); });
       ws.send(JSON.stringify({ id, method, params }));
     });
   };
 
-  return { send, events, close: () => ws.close() };
+  // Called for every event of that method, as it arrives.
+  const on = (method, fn) => {
+    if (!listeners.has(method)) listeners.set(method, []);
+    listeners.get(method).push(fn);
+  };
+
+  return { send, on, events, close: () => ws.close() };
 }
 
 export async function evaluate(cdp, expression) {

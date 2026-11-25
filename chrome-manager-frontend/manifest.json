@@ -3,9 +3,12 @@
   "name": "Chrome Manager Agent",
   "version": "0.1.0",
   "description": "Manage Chrome tabs with natural language.",
+  "minimum_chrome_version": "116",
   "action": {
-    "default_title": "Chrome Agent",
-    "default_popup": "pop_up.html"
+    "default_title": "Chrome Agent"
+  },
+  "side_panel": {
+    "default_path": "pop_up.html"
   },
   "background": {
     "service_worker": "background.js",
@@ -14,7 +17,8 @@
   "permissions": [
     "tabs",
     "tabGroups",
-    "storage"
+    "storage",
+    "sidePanel"
   ],
   "host_permissions": [
     "https://api.groq.com/*"

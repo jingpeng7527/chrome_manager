@@ -13,3 +13,6 @@ node_modules/
 
 # Logs
 *.log
+
+# Stress test output (npm run stress)
+e2e/results/

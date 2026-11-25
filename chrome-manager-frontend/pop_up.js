@@ -50,13 +50,34 @@ function afterShown(fn) {
     else window.addEventListener('load', run, { once: true });
 }
 
+// The tab count waits longer still, for the popup's first paint. With the
+// "tabs" permission chrome.tabs.query returns every tab's favicon, and pages
+// that set a data: URL favicon put the whole image in it: 300 such tabs came
+// to 8 MB. Copying that out of Chrome's main process while the popup is still
+// being put on screen added ~70 ms to the open (npm run stress, busy tabs).
+// After the first paint it delays only the count.
+function afterPainted(fn) {
+    let done = false;
+    const run = () => { if (!done) { done = true; setTimeout(fn, 0); } };
+    if (performance.getEntriesByName('first-contentful-paint').length) { run(); return; }
+    new PerformanceObserver((list) => {
+        if (list.getEntriesByName('first-contentful-paint').length) run();
+    }).observe({ type: 'paint', buffered: true });
+    // Never leave the count blank if a paint entry does not arrive.
+    afterShown(() => setTimeout(run, 500));
+}
+
 afterShown(() => {
     // One storage round trip for both values rather than two.
     chrome.storage.local.get(['groqApiKey', 'lastStatus'], (data) => {
         if (data?.groqApiKey) document.getElementById('apiKeyInput').value = data.groqApiKey;
         showLastStatus(data?.lastStatus);
     });
+});
+
+afterPainted(() => {
     refreshTabCount();
+    trackTabCount();
 });
 
 showRenderTime();
@@ -106,10 +127,37 @@ document.getElementById('apiKeyInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') document.getElementById('saveKeyBtn').click();
 });
 
+let tabCount = null;
+let windowId = null;
+
+function showTabCount() {
+    document.getElementById('tabCount').textContent = `${tabCount ?? 0} tabs`;
+}
+
 function refreshTabCount() {
     chrome.tabs.query({ currentWindow: true }, (tabs) => {
-        document.getElementById('tabCount').textContent = `${tabs?.length ?? 0} tabs`;
+        tabCount = tabs?.length ?? 0;
+        windowId = tabs?.[0]?.windowId ?? windowId;
+        showTabCount();
     });
+}
+
+// The side panel stays open while tabs come and go. Keep the count current
+// from tab events instead of querying again: a query returns every tab with
+// its favicon, megabytes with hundreds of tabs, and opening a batch of tabs
+// would repeat it for each one.
+function trackTabCount() {
+    const adjust = (inWindow, delta) => {
+        if (tabCount == null || windowId == null || inWindow !== windowId) return;
+        tabCount = Math.max(0, tabCount + delta);
+        showTabCount();
+    };
+    chrome.tabs.onCreated.addListener((tab) => adjust(tab.windowId, +1));
+    chrome.tabs.onRemoved.addListener((_id, info) => {
+        if (!info.isWindowClosing) adjust(info.windowId, -1);
+    });
+    chrome.tabs.onAttached.addListener((_id, info) => adjust(info.newWindowId, +1));
+    chrome.tabs.onDetached.addListener((_id, info) => adjust(info.oldWindowId, -1));
 }
 
 // Commands that need no model run here rather than in the service worker.

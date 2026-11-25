@@ -22,10 +22,10 @@ describe('manifest.json', () => {
   it('points at files that exist', () => {
     const referenced = [
       manifest.background?.service_worker,
-      manifest.action?.default_popup,
+      manifest.side_panel?.default_path,
     ].filter(Boolean);
 
-    assert.ok(referenced.length >= 2, 'expected a service worker and a popup');
+    assert.ok(referenced.length >= 2, 'expected a service worker and a side panel page');
     for (const file of referenced) {
       assert.ok(existsSync(join(EXT_DIR, file)), `manifest references missing file: ${file}`);
     }
@@ -87,8 +87,18 @@ describe('manifest.json', () => {
   });
 });
 
+describe('toolbar icon', () => {
+  it('opens the side panel, not a popup', () => {
+    // Chrome builds a popup window from scratch on every click, 320 to 400 ms
+    // on a Mac even for a blank popup; the side panel opens in about a third.
+    assert.equal(manifest.action.default_popup, undefined, 'a default_popup would win over the side panel');
+    assert.ok(manifest.permissions.includes('sidePanel'));
+    assert.match(read('background.js'), /setPanelBehavior\(\{\s*openPanelOnActionClick:\s*true\s*\}\)/);
+  });
+});
+
 describe('popup', () => {
-  const html = read(manifest.action.default_popup);
+  const html = read(manifest.side_panel.default_path);
   const script = read('pop_up.js');
 
   it('loads its script', () => {
@@ -149,5 +159,14 @@ describe('popup', () => {
     for (const call of ['chrome.storage.local.get(', 'refreshTabCount();']) {
       assert.ok(first(call) > deferred, `${call} runs before the popup is shown`);
     }
+  });
+
+  it('counts tabs only after the first paint', () => {
+    // chrome.tabs.query returns every tab's favicon, data: URLs included; with
+    // hundreds of tabs that is megabytes Chrome copies while the popup is
+    // still going on screen.
+    assert.match(script, /afterPainted\(\(\) => \{\s*refreshTabCount\(\)/);
+    const startup = script.slice(script.indexOf('afterShown(() =>'), script.indexOf('afterPainted(() =>'));
+    assert.doesNotMatch(startup, /refreshTabCount\(\)/, 'the startup block should not count tabs itself');
   });
 });

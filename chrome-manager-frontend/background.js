@@ -13,6 +13,14 @@ import {
 } from './lib.js';
 import { collectTabState, executeCommands } from './chrome-api.js';
 
+// The toolbar icon opens the side panel rather than a popup. Chrome builds a
+// popup window from scratch on every click, and on a Mac that alone takes
+// 320 to 400 ms whatever the popup contains: a blank one-line popup measured
+// the same as this one (npm run stress). The side panel opens in about a
+// third of that and then stays open while the user works with their tabs.
+// Set at every worker start; Chrome keeps it, and it costs nothing to repeat.
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((e) => console.error(e));
+
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODELS_URL = 'https://api.groq.com/openai/v1/models';
 const GROQ_MODEL = 'openai/gpt-oss-120b';
