@@ -33,9 +33,30 @@ close duplicates
 ungroup all
 ```
 
+## How it works
+
+```
+  You type a command
+          │
+          ▼
+  Simple command? ── yes ──► matched locally, runs instantly
+          │
+          no
+          ▼
+  Service worker ──► Groq AI labels each tab with a topic
+          │
+          ▼
+  Chrome tabs and groups are updated
+```
+
+- **Side panel and address bar** (`pop_up.html`, omnibox): where you type. Simple commands like `group github` or `close duplicates` are matched right there, with no network call.
+- **Service worker** (`background.js`): handles commands that need judgement, like `group by topic`, and talks to Groq.
+- **Groq**: only gives each tab a topic label. The extension itself decides the groups, so a wrong label can only misplace one tab.
+- **Core logic** (`lib.js`): the matching and grouping rules, kept free of Chrome APIs so they are easy to test.
+
 ## For developers
 
-See [docs/DESIGN.md](docs/DESIGN.md) for how it works.
+See [docs/DESIGN.md](docs/DESIGN.md) for more detail.
 
 ## License
 
