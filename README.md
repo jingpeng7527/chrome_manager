@@ -20,7 +20,7 @@ Type something like "group my GitHub tabs" or "close duplicates", and Tab Agent 
 1. Get a free API key at [console.groq.com](https://console.groq.com)
 2. Open `chrome://extensions` and turn on **Developer mode**
 3. Click **Load unpacked** and choose the `chrome-manager-frontend` folder
-4. Click the extension icon, then **API Key**, and paste your key
+4. Click the extension icon, then the key icon at the top of the panel, and paste your key
 
 ## 💬 Use it
 
