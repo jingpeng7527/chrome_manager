@@ -50,7 +50,8 @@ const OUT_DIR = join(ROOT, 'e2e', 'results');
 const PORT = 7802;
 
 const list = (v, fallback) => (v ? v.split(',').map((x) => Number(x.trim())) : fallback);
-const TAB_LEVELS = list(process.env.STRESS_TABS, [1, 50, 150, 300]);
+const TAB_LEVELS = list(process.env.STRESS_TABS, [1, 50, 100, 300]);
+const HEADED = !!process.env.STRESS_HEADED;  // real windows; slower, closer to a desktop
 const OPEN_RUNS = Number(process.env.STRESS_RUNS ?? 10);     // per build, per cell
 const COMMAND_RUNS = Number(process.env.STRESS_COMMAND_RUNS ?? 3);
 const LATENCIES = list(process.env.STRESS_LATENCIES, [0, 500, 2000, 5000]);
@@ -217,11 +218,34 @@ async function setStorage(build, level) {
 // One real popup open: from chrome.action.openPopup() through to pixels and
 // then to the data being filled in. Same method as bench.mjs, see there for
 // why the popup's timeOrigin can be compared against Date.now().
+// How the popup gets opened. Extensions.triggerAction is the toolbar click
+// itself: it does not wake the service worker, so the popup lands on whatever
+// state the extension is in, cold or warm, as a real click does. Without it,
+// chrome.action.openPopup() is called from the worker, which is then warm.
+const opener = { browser: null, tabId: null };
+
+async function setUpClicks() {
+  const { webSocketDebuggerUrl } = await (await fetch('http://localhost:9222/json/version')).json();
+  const cdp = connect(webSocketDebuggerUrl);
+  const r = await cdp.send('Target.getTargets', { filter: [{ type: 'tab' }] });
+  const tab = r.result?.targetInfos?.find((t) => t.url === 'about:blank') ?? r.result?.targetInfos?.[0];
+  if (!tab) { cdp.close(); return false; }
+  opener.browser = cdp;
+  opener.tabId = tab.targetId;
+  return true;
+}
+
 async function openOnce(build, worker) {
   DEBUG('open', build.name);
+  const workerWasRunning = !!(await findTarget((t) => t.type === 'service_worker' && t.url.includes(build.id)));
   const t0 = Date.now();
-  const result = await evaluate(worker, `chrome.action.openPopup().then(() => 'ok').catch((e) => e.message)`);
-  if (result !== 'ok') return { error: result };
+  if (opener.browser) {
+    const r = await opener.browser.send('Extensions.triggerAction', { id: build.id, targetId: opener.tabId });
+    if (r.error) return { error: r.error.message };
+  } else {
+    const result = await evaluate(worker, `chrome.action.openPopup().then(() => 'ok').catch((e) => e.message)`);
+    if (result !== 'ok') return { error: result };
+  }
 
   const target = await waitFor(() => findTarget((t) => t.type === 'page' && t.url.includes(`${build.id}/pop_up.html`) && !t.url.includes('?tab')), { every: 10 });
   if (!target) return { error: 'popup target never appeared' };
@@ -256,6 +280,7 @@ async function openOnce(build, worker) {
   const r = (x) => Math.round(x);
   const window_ = m.origin - t0;
   return {
+    cold: !workerWasRunning,            // service worker asleep at the click
     window: r(window_),                 // Chrome building the popup window
     fcp: r(m.fcp),                      // popup page to first paint
     load: r(m.load),                    // popup page load event
@@ -386,9 +411,13 @@ try {
     const profileDir = mkdtempSync(join(workDir, 'profile-'));
     browser = await launch({
       binary, extensionDir: builds.map((b) => b.dir).join(','), profileDir, hosts: ['*.test'], port: PORT,
+      headless: !HEADED, extraArgs: ['--enable-unsafe-extension-debugging'],
     });
     const workers = {};
-    for (const b of builds) workers[b.name] = await workerOf(b);
+    await sleep(1500);
+    const clicks = await setUpClicks().catch(() => false);
+    console.log(clicks ? 'opening popups with a simulated toolbar click' : 'opening popups with chrome.action.openPopup()');
+    if (!clicks) for (const b of builds) workers[b.name] = await workerOf(b);
     for (const b of real) await setStorage(b, storage);
 
     for (const tabs of TAB_LEVELS) {
@@ -401,9 +430,11 @@ try {
     }
 
     Object.values(workers).forEach((w) => w.close());
+    opener.browser?.close();
+    opener.browser = null;
     browser.kill();
     browser = null;
-    rmSync(profileDir, { recursive: true, force: true });
+    rmSync(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
   }
 
   // Model path: overhead against tab count at a typical Groq latency, then
@@ -412,6 +443,7 @@ try {
     const profileDir = mkdtempSync(join(workDir, 'profile-'));
     browser = await launch({
       binary, extensionDir: real.map((b) => b.dir).join(','), profileDir, hosts: ['*.test'], port: PORT,
+      headless: !HEADED,
     });
     const stubState = { latency: 0 };
     const workers = [];
@@ -443,7 +475,7 @@ try {
 } finally {
   browser?.kill();
   fixtures?.close();
-  rmSync(workDir, { recursive: true, force: true });
+  rmSync(workDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
 }
 
 const run = {
