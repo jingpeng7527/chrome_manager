@@ -47,6 +47,21 @@ Moving from a popup to a side panel made opening Tab Agent **3 to 4 times faster
 
 <sub>Measured with <code>npm run stress</code> on a MacBook.</sub>
 
+### How long grouping takes
+
+From pressing Enter to the status line showing Done. For `group by topic` the wait for the AI reply is left out.
+
+| Open tabs | `group <site>` | `group by topic` |
+|---:|---:|---:|
+| 1 | under 0.01 s | under 0.01 s |
+| 50 | under 0.01 s | 0.03 s |
+| 100 | 0.01 s | 0.06 s |
+| 300 | 0.07 s | 0.34 s |
+
+Most of the time is Chrome moving tabs into groups. Reading the tabs takes a few milliseconds even at 300.
+
+<sub>Measured with <code>npm run group-time</code> on a MacBook, tabs spread over five sites.</sub>
+
 ## ⚙️ How it works
 
 ```
