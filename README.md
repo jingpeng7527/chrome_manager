@@ -35,7 +35,7 @@ ungroup all
 
 ## For developers
 
-See [docs/DESIGN.md](docs/DESIGN.md) for how it works and how to run the tests.
+See [docs/DESIGN.md](docs/DESIGN.md) for how it works.
 
 ## License
 
