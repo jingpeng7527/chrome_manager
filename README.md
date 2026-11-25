@@ -10,10 +10,10 @@ Type something like "group my GitHub tabs" or "close duplicates", and Tab Agent 
 
 ## ✨ What it can do
 
-- 📁 Group tabs by site or by topic
-- 🧹 Close duplicate tabs
-- 📤 Ungroup or close tabs in bulk
-- ➕ Add tabs to groups you already have
+- Group tabs by site or by topic
+- Close duplicate tabs
+- Ungroup or close tabs in bulk
+- Add tabs to groups you already have
 
 ## 🚀 Install
 
