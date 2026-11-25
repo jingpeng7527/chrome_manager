@@ -139,3 +139,17 @@ It varies these things:
 Both builds are loaded into one browser and opened in turn, so they always face the same tabs and the same machine load. Comparing builds from two separate browser sessions mostly measures run to run noise. A blank extension is opened in the same rotation as the floor Chrome itself sets. The report labels each build as popup or side panel according to how it opens.
 
 Groq is stubbed over the DevTools protocol, so no API key is needed and the total minus the stub's delay is purely this extension's own time. A full run takes about 6 minutes.
+
+### Results: popup vs side panel
+
+On a MacBook, open time in ms (old popup / side panel / blank extension popup as Chrome's floor):
+
+| tabs | popup | side panel | blank popup |
+|---|---|---|---|
+| 1 | 353 | 96 | 337 |
+| 50 | 383 | 97 | 349 |
+| 100 | 388 | 120 | 353 |
+| 300 | 373 | 107 | 359 |
+| 300, all loaded and busy | 632 | 210 | 420 |
+
+The old popup was never far above the blank popup, so almost all of its cost was Chrome building the popup window. The side panel skips that window, which is why it opens 3 to 4 times faster and beats even the blank popup.
