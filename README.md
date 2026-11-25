@@ -5,7 +5,7 @@ Organize your Chrome tabs by just saying what you want.
 Type something like "group my GitHub tabs" or "close duplicates", and Tab Agent does it for you. Simple commands run instantly on your machine. Smarter ones, like grouping by topic, use Groq's free AI API.
 
 <p align="center">
-  <img src="docs/images/side-panel.png" alt="Tab Agent side panel" width="320">
+  <img src="docs/images/side-panel.png" alt="Tab Agent side panel" width="480">
 </p>
 
 ## ✨ What it can do
