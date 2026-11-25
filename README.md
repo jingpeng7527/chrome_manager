@@ -5,7 +5,7 @@ Organize your Chrome tabs by just saying what you want.
 Type something like "group my GitHub tabs" or "close duplicates", and Tab Agent does it for you. Simple commands run instantly on your machine. Smarter ones, like grouping by topic, use Groq's free AI API.
 
 <p align="center">
-  <img src="docs/images/side-panel.png" alt="Tab Agent side panel" width="380">
+  <img src="docs/images/side-panel.png" alt="Tab Agent side panel" width="320">
 </p>
 
 ## ✨ What it can do
@@ -36,6 +36,16 @@ group by topic
 close duplicates
 ungroup all
 ```
+
+## ⚡ Performance
+
+Moving from a popup to a side panel made opening Tab Agent **3 to 4 times faster**, and it now opens faster than even a blank Chrome popup can.
+
+<p align="center">
+  <img src="docs/images/open-time.svg" alt="Open time: popup vs side panel" width="720">
+</p>
+
+<sub>Measured with <code>npm run stress</code> on a MacBook.</sub>
 
 ## ⚙️ How it works
 
