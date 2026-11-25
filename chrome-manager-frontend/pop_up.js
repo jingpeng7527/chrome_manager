@@ -85,10 +85,21 @@ showRenderTime();
 // Example chips
 document.querySelectorAll('.example-chip').forEach((chip) => {
     chip.addEventListener('click', () => {
-        document.getElementById('userInput').value = chip.textContent;
-        document.getElementById('userInput').focus();
+        const input = document.getElementById('userInput');
+        input.value = chip.dataset.prompt || chip.textContent.trim();
+        fitInput();
+        input.focus();
     });
 });
+
+// The input grows with what is typed, up to a cap set in CSS (max-height),
+// so a long command stays readable in a narrow panel.
+function fitInput() {
+    const input = document.getElementById('userInput');
+    input.style.height = 'auto';
+    input.style.height = input.scrollHeight + 'px';
+}
+document.getElementById('userInput').addEventListener('input', fitInput);
 
 // API key modal
 document.getElementById('openKeyModal').onclick = () => {
@@ -98,6 +109,9 @@ document.getElementById('openKeyModal').onclick = () => {
 document.getElementById('modalCancel').onclick = () => {
     document.getElementById('modalOverlay').classList.remove('open');
 };
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') document.getElementById('modalOverlay').classList.remove('open');
+});
 document.getElementById('modalOverlay').onclick = (e) => {
     if (e.target === document.getElementById('modalOverlay')) {
         document.getElementById('modalOverlay').classList.remove('open');
